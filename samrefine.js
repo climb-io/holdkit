@@ -20,7 +20,7 @@
   const DEC_URL = new URL('web/models/mobilesam-decoder.onnx', base).href;
   const CHOICE_KEY = 'spraywall.samBackend.v1';
   const SIDE = 1024;
-  const T = (zh, en) => (document.documentElement.lang || '').startsWith('zh') ? zh : en;
+  const T = (k, ...a) => (self.spraywallT ? self.spraywallT(k, ...a) : k);   // 訊息在語言包（i18n/<語言>.js），用 index.html 的 t()
 
   // 電腦：滑鼠（精細指標、可以懸停），而且不是手機或平板的瀏覽器
   function available() {
@@ -40,7 +40,7 @@
           ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 4) : 1;
           resolve();
         };
-        s.onerror = () => { ortReady = null; s.remove(); reject(new Error(T('無法載入 onnxruntime-web（請確認網路）', 'Could not load onnxruntime-web (check your connection)'))); };
+        s.onerror = () => { ortReady = null; s.remove(); reject(new Error(T('ortLoadFail'))); };
         document.head.append(s);
       });
     }
@@ -53,10 +53,10 @@
   async function download(status) {
     if (bufs) return bufs;
     const TOTAL = 44.7e6, got = [0, 0];
-    const tell = () => { const mb = (got[0] + got[1]) / 1e6; status(T(`下載描輪廓模型 ${mb.toFixed(0)}／45 MB（只有第一次）`, `Downloading the outline model ${mb.toFixed(0)} / 45 MB (first time only)`), Math.min(1, (got[0] + got[1]) / TOTAL)); };
+    const tell = () => { const mb = (got[0] + got[1]) / 1e6; status(T('samDownload', mb.toFixed(0)), Math.min(1, (got[0] + got[1]) / TOTAL)); };
     const get = async (u, k) => {
       const r = await fetch(u);
-      if (!r.ok) throw new Error(T(`模型下載失敗（HTTP ${r.status}）`, `Model download failed (HTTP ${r.status})`));
+      if (!r.ok) throw new Error(T('modelHttp', r.status));
       if (!r.body || !r.body.getReader) return r.arrayBuffer();
       const rd = r.body.getReader(), parts = [];
       let last = 0;
@@ -108,7 +108,7 @@
     try { saved = key && JSON.parse(localStorage.getItem(CHOICE_KEY) || '{}')[key]; } catch (e) { /* 忽略 */ }
     if (!key) return { kind: 'wasm', sess: await create(bufs.e, 'wasm'), emb: null };
     if (saved) { try { return { kind: saved, sess: await create(bufs.e, saved), emb: null }; } catch (e) { /* 重新檢查 */ } }
-    status(T('第一次使用：檢查這台電腦最快又正確的執行方式（約 5–10 秒）…', 'First run: finding the fastest reliable mode for this computer (5–10 s)…'), null);
+    status(T('samFirstRun'), null);
     const wasm = await create(bufs.e, 'wasm');
     const ref = await embed(wasm, input);
     let pick = { kind: 'wasm', sess: wasm, emb: ref };
@@ -173,7 +173,7 @@
       enc = p.sess; backend = p.kind; emb = p.emb;
     }
     if (!dec) dec = await pickDecoder(input.w, input.h, emb || null);
-    if (!emb) { status(T('分析照片中…', 'Analysing the photo…'), null); emb = await embed(enc, input); }
+    if (!emb) { status(T('samAnalyzing'), null); emb = await embed(enc, input); }
     cache = { key, src, emb, s: input.s, w: input.w, h: input.h };
     return cache;
   }
