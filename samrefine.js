@@ -255,8 +255,20 @@
   let worker = null, wReady = null, wSeq = 0, onProg = null, pcache = null, pbusy = null;
   const wWait = new Map();
   const tapAvailable = () => !available() && typeof Worker !== 'undefined';
-  function call(msg, transfer = []) {
-    return new Promise((ok, no) => { const id = ++wSeq; wWait.set(id, { ok, no }); worker.postMessage({ ...msg, id }, transfer); });
+  // Worker 當掉（例如手機記憶體不足被系統關掉）或太久沒回應：整個重來，下次用到再重新載入；等著的都回報錯誤，不會卡住
+  function resetWorker(err) {
+    for (const p of wWait.values()) p.no(err);
+    wWait.clear();
+    if (worker) worker.terminate();
+    worker = null; wReady = null; pcache = null;
+  }
+  function call(msg, transfer = [], ms = 120000) {
+    if (!worker) return Promise.reject(new Error(T('samTimeout')));
+    return new Promise((ok, no) => {
+      const id = ++wSeq, timer = setTimeout(() => resetWorker(new Error(T('samTimeout'))), ms);
+      wWait.set(id, { ok: (v) => { clearTimeout(timer); ok(v); }, no: (e) => { clearTimeout(timer); no(e); } });
+      worker.postMessage({ ...msg, id }, transfer);
+    });
   }
   function initWorker(status) {
     if (wReady) return wReady;
@@ -268,13 +280,14 @@
       wWait.delete(m.id);
       if (m.error) p.no(new Error(m.error)); else p.ok(m);
     };
-    worker.onerror = (e) => { for (const p of wWait.values()) p.no(new Error(e.message || 'worker')); wWait.clear(); };
+    worker.onerror = (e) => resetWorker(new Error(e.message || T('samTimeout')));
     onProg = (b) => status(T('samDownload', (b / 1e6).toFixed(0)), Math.min(1, b / 44.7e6));
     status(T('samDownload', 0), 0);
-    wReady = call({ type: 'init', ort: CDN + 'ort.wasm.min.js', wasm: CDN, enc: ENC_URL, dec: DEC_URL })
+    const ready = call({ type: 'init', ort: CDN + 'ort.wasm.min.js', wasm: CDN, enc: ENC_URL, dec: DEC_URL }, [], 10 * 60000)   // 下載 45 MB：慢的網路給 10 分鐘
       .then(r => { stats.download = r.dl; stats.load = r.load; return r; })
-      .catch(e => { wReady = null; worker.terminate(); worker = null; throw e; });
-    return wReady;
+      .catch(e => { if (wReady === ready) resetWorker(e); throw e; });
+    wReady = ready;
+    return ready;
   }
   function embDb() {
     return new Promise((ok, no) => {
@@ -287,12 +300,18 @@
     try { const db = await embDb(); return await new Promise(ok => { const q = db.transaction('emb').objectStore('emb').get(k); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); }); }
     catch (e) { return null; }
   }
+  const idbDone = (tx) => new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = tx.onabort = () => no(tx.error); });
   async function embPut(k, emb) {
     try {
-      const db = await embDb(), st = db.transaction('emb', 'readwrite').objectStore('emb');
-      st.put({ t: Date.now(), emb }, k);
-      const all = await new Promise(ok => { const out = []; const c = st.openCursor(); c.onsuccess = () => { const x = c.result; if (!x) return ok(out); out.push([x.key, x.value.t]); x.continue(); }; });
-      all.sort((a, b) => b[1] - a[1]).slice(3).forEach(([key]) => st.delete(key));   // 只留最近 3 張
+      const db = await embDb();
+      const put = db.transaction('emb', 'readwrite'); put.objectStore('emb').put({ t: Date.now(), emb }, k); await idbDone(put);
+      // 只留最近 3 張：先讀出每筆的時間，再用另一個交易刪（在 Promise 之後才刪，有的瀏覽器交易已經結束了）
+      const rd = db.transaction('emb'), all = [];
+      const c = rd.objectStore('emb').openCursor();
+      c.onsuccess = () => { const x = c.result; if (x) { all.push([x.key, x.value.t]); x.continue(); } };
+      await idbDone(rd);
+      const old = all.sort((a, b) => b[1] - a[1]).slice(3);
+      if (old.length) { const del = db.transaction('emb', 'readwrite'), st = del.objectStore('emb'); for (const [key] of old) st.delete(key); await idbDone(del); }
     } catch (e) { /* 存不了就下次再分析 */ }
   }
   async function ensurePhone(src, key, status) {
@@ -300,14 +319,14 @@
     await initWorker(status);
     const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s), ek = `${key}|${w}x${h}`;
     const saved = await embGet(ek);
-    if (saved) { await call({ type: 'setEmb', emb: saved.emb }); stats.encode = 0; }
+    if (saved) { await call({ type: 'setEmb', emb: saved.emb }); stats.encode = 0; }   // 存起來的照片特徵
     else {
       status(T('samAnalyzing'), null);
       const c = document.createElement('canvas'); c.width = w; c.height = h;
       const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(src, 0, 0, w, h);
       const px = g.getImageData(0, 0, w, h).data, data = new Float32Array(w * h * 3);
       for (let i = 0, j = 0; i < w * h; i++, j += 4) { data[i * 3] = px[j]; data[i * 3 + 1] = px[j + 1]; data[i * 3 + 2] = px[j + 2]; }
-      const r = await call({ type: 'embed', data, w, h }, [data.buffer]);
+      const r = await call({ type: 'embed', data, w, h }, [data.buffer], 5 * 60000);
       stats.encode = r.ms;
       embPut(ek, r.emb);
     }
@@ -328,7 +347,7 @@
       const rx0 = Math.max(0, Math.floor(x0 * s - g)), ry0 = Math.max(0, Math.floor(y0 * s - g));
       const rx1 = Math.min(c.w, Math.ceil(x1 * s + g)), ry1 = Math.min(c.h, Math.ceil(y1 * s + g)), rw = rx1 - rx0, rh = ry1 - ry0;
       if (rw < 3 || rh < 3) return null;
-      const r = await call({ type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } });
+      const r = await call({ type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } }, [], 60000);
       stats.decode = r.ms; stats.decodes.push(r.ms);
       const pts = outline(r.mask, rw, rh, cx * s - rx0, cy * s - ry0);
       return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
