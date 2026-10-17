@@ -14,7 +14,7 @@
 //   HoldRefiner.msPerHold()                       → 最近每顆重描花的毫秒數（估剩餘時間用）
 (() => {
   'use strict';
-  const ORT_VERSION = (window.HoldDetector && window.HoldDetector.ORT_VERSION) || '1.30.0';
+  const ORT_VERSION = '1.30.0';
   const base = document.currentScript.src;
   const ENC_URL = new URL('web/models/mobilesam-encoder.onnx', base).href;
   const DEC_URL = new URL('web/models/mobilesam-decoder.onnx', base).href;
