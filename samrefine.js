@@ -218,7 +218,7 @@
 
   let msAvg = null;
   try { msAvg = +localStorage.getItem('spraywall.samMs') || null; } catch (e) { /* 忽略 */ }
-  const msPerHold = () => msAvg || (backend && backend !== 'wasm' ? 70 : 170);
+  const msPerHold = () => (stats.decodes.length ? stats.decodes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, stats.decodes.length) : 0) || msAvg || (backend && backend !== 'wasm' ? 70 : 170);
   async function refine(src, key, poly, status = () => {}, { box = null } = {}) {
     while (busy) await busy.catch(() => {});
     let done;
@@ -251,7 +251,7 @@
   // 整張照片的特徵（約 4 MB）存在 IndexedDB（最近 3 張），同一張照片之後打開不用再分析。
   // stats 記每一步花的時間，給使用者實測：download 下載模型、load 載入、encode 分析照片（0＝用存起來的）、decode 最近一顆重描
   const CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
-  const stats = { download: null, load: null, encode: null, decode: null };
+  const stats = { download: null, load: null, encode: null, decode: null, decodes: [] };
   let worker = null, wReady = null, wSeq = 0, onProg = null, pcache = null, pbusy = null;
   const wWait = new Map();
   const tapAvailable = () => !available() && typeof Worker !== 'undefined';
@@ -314,7 +314,7 @@
     pcache = { key, src, s, w, h };
     return pcache;
   }
-  async function refineTap(src, key, poly, status = () => {}) {
+  async function refineTap(src, key, poly, status = () => {}, { box = null } = {}) {
     while (pbusy) await pbusy.catch(() => {});
     let done;
     pbusy = new Promise(r => { done = r; });
@@ -323,12 +323,13 @@
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx = 0, cy = 0;
       for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
       cx /= poly.length; cy /= poly.length;
+      if (box) [x0, y0, x1, y1] = box;
       const s = c.s, g = Math.max(x1 - x0, y1 - y0) * s;
       const rx0 = Math.max(0, Math.floor(x0 * s - g)), ry0 = Math.max(0, Math.floor(y0 * s - g));
       const rx1 = Math.min(c.w, Math.ceil(x1 * s + g)), ry1 = Math.min(c.h, Math.ceil(y1 * s + g)), rw = rx1 - rx0, rh = ry1 - ry0;
       if (rw < 3 || rh < 3) return null;
       const r = await call({ type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } });
-      stats.decode = r.ms;
+      stats.decode = r.ms; stats.decodes.push(r.ms);
       const pts = outline(r.mask, rw, rh, cx * s - rx0, cy * s - ry0);
       return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
     } finally { pbusy = null; done(); }
