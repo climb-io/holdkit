@@ -3,7 +3,7 @@
 攀岩牆岩點階段的分析：偵測框 → 岩點外框、MobileSAM 重描外框、每顆岩點的彩色範圍與顏色。Apache-2.0。
 
 岩點偵測（照片 → 框）在 [climb-io/holdscan](https://github.com/climb-io/holdscan)（AGPL-3.0），
-App 是 Spray Wall。三者之間只交換資料（框的陣列、[岩點資料包](SPEC.md)），holdkit 不含、也不呼叫 holdscan 的程式。
+App 是 Climbio。三者之間只交換資料（框的陣列、[岩點資料包](SPEC.md)），holdkit 不含、也不呼叫 holdscan 的程式。
 
 ## 結構
 
