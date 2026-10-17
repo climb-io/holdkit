@@ -1,7 +1,7 @@
 // 岩點重描輪廓（只有電腦版）：MobileSAM 以目前輪廓的外框當提示，重新切出這顆岩點。
 // 手機的 GPU 實測會算錯（Adreno 7xx），只用 CPU 要 7–9 秒，所以手機不開這個功能。
 //
-// 模型（web/models/，來源與授權見 web/models/README.md）：
+// 模型（models/，來源與授權見 models/README.md、NOTICE）：跟 samrefine.js 放在一起，相對路徑是 models/
 //   encoder：整張照片（長邊 1024）算一次特徵，同一張照片之後重描都用快取
 //   decoder：每次重描跑一次（電腦約 0.1 秒）
 // 第一次使用時跟岩點偵測一樣先檢查 GPU 算得對不對（WebGPU 和 CPU 結果比對），不對就用 CPU；結論記在 localStorage。
@@ -12,15 +12,25 @@
 //     box：提示用的框 [x0, y0, x1, y1]（偵測框），不給就用輪廓的外框
 //     status(文字, 進度 0–1 或 null)：下載模型、檢查執行方式、分析照片時回報
 //   HoldRefiner.msPerHold()                       → 最近每顆重描花的毫秒數（估剩餘時間用）
+//   HoldRefiner.configure({ t, keyPrefix, db, cloudUrl, idToken })   第一次重描之前設定（都可以不給）：
+//     t(key, ...參數)：訊息翻譯（不給就用內建英文）；keyPrefix、db：localStorage key 的開頭、IndexedDB 名稱；
+//     cloudUrl、idToken()：雲端重描（functions/ 的 retrace 網址、取得 Firebase ID token 的函式），兩個都給才開
 (() => {
   'use strict';
   const ORT_VERSION = '1.30.0';
   const base = document.currentScript.src;
-  const ENC_URL = new URL('web/models/mobilesam-encoder.onnx', base).href;
-  const DEC_URL = new URL('web/models/mobilesam-decoder.onnx', base).href;
-  const CHOICE_KEY = 'spraywall.samBackend.v1';
+  const ENC_URL = new URL('models/mobilesam-encoder.onnx', base).href;
+  const DEC_URL = new URL('models/mobilesam-decoder.onnx', base).href;
+  const cfg = { t: null, keyPrefix: 'holdkit.', db: 'holdkit-sam', cloudUrl: null, idToken: null };
+  const configure = (o) => Object.assign(cfg, o);
+  const CHOICE_KEY = () => cfg.keyPrefix + 'samBackend.v1';
   const SIDE = 1024;
-  const T = (k, ...a) => (self.spraywallT ? self.spraywallT(k, ...a) : k);   // 訊息在語言包（i18n/<語言>.js），用 index.html 的 t()
+  const MSG = {
+    ortLoadFail: 'Couldn’t load onnxruntime-web. Check your connection.', modelHttp: (s) => `Model download failed (HTTP ${s})`,
+    samDownload: (mb) => `Downloading the outline model ${mb} / 45 MB (first time only)`, samFirstRun: 'First run: finding the best mode for this computer (5–10 s)…',
+    samAnalyzing: 'Analyzing the photo…', samTimeout: 'The outline model stopped responding. Try again later.',
+  };
+  const T = (k, ...a) => cfg.t ? cfg.t(k, ...a) : typeof MSG[k] === 'function' ? MSG[k](...a) : MSG[k] || k;
 
   // 電腦：滑鼠（精細指標、可以懸停），而且不是手機或平板的瀏覽器
   function available() {
@@ -105,7 +115,7 @@
       } catch (e) { /* 沒有 GPU */ }
     }
     let saved = null;
-    try { saved = key && JSON.parse(localStorage.getItem(CHOICE_KEY) || '{}')[key]; } catch (e) { /* 忽略 */ }
+    try { saved = key && JSON.parse(localStorage.getItem(CHOICE_KEY()) || '{}')[key]; } catch (e) { /* 忽略 */ }
     if (!key) return { kind: 'wasm', sess: await create(bufs.e, 'wasm'), emb: null };
     if (saved) { try { return { kind: saved, sess: await create(bufs.e, saved), emb: null }; } catch (e) { /* 重新檢查 */ } }
     status(T('samFirstRun'), null);
@@ -123,17 +133,17 @@
       } catch (e) { /* 這種設定不支援 */ }
       if (sess) await sess.release();
     }
-    try { const c = JSON.parse(localStorage.getItem(CHOICE_KEY) || '{}'); c[key] = pick.kind; localStorage.setItem(CHOICE_KEY, JSON.stringify(c)); } catch (e) { /* 忽略 */ }
+    try { const c = JSON.parse(localStorage.getItem(CHOICE_KEY()) || '{}'); c[key] = pick.kind; localStorage.setItem(CHOICE_KEY(), JSON.stringify(c)); } catch (e) { /* 忽略 */ }
     return pick;
   }
 
   // decoder 每顆都要跑：GPU 約 0.05 秒、CPU 約 0.14 秒。第一次用固定的提示和 CPU 結果比，遮罩幾乎一樣才用 GPU；結論跟 encoder 記在一起
-  const DEC_KEY = 'spraywall.samDecoder.v1';
+  const DEC_KEY = () => cfg.keyPrefix + 'samDecoder.v1';
   async function pickDecoder(w, h) {
     const wasm = await create(bufs.d, 'wasm');
     if (!backend || backend === 'wasm') return wasm;
     let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(DEC_KEY) || '{}')[navigator.userAgent]; } catch (e) { /* 忽略 */ }
+    try { saved = JSON.parse(localStorage.getItem(DEC_KEY()) || '{}')[navigator.userAgent]; } catch (e) { /* 忽略 */ }
     if (saved === 'wasm') return wasm;
     let gpu = null;
     try {
@@ -145,7 +155,7 @@
         let i = 0, u = 0;
         for (let k = 0; k < a.length; k++) { const x = a[k] > 0, y = b[k] > 0; if (x && y) i++; if (x || y) u++; }
         const ok = !u || i / u > 0.98;
-        try { const c = JSON.parse(localStorage.getItem(DEC_KEY) || '{}'); c[navigator.userAgent] = ok ? 'webgpu' : 'wasm'; localStorage.setItem(DEC_KEY, JSON.stringify(c)); } catch (e) { /* 忽略 */ }
+        try { const c = JSON.parse(localStorage.getItem(DEC_KEY()) || '{}'); c[navigator.userAgent] = ok ? 'webgpu' : 'wasm'; localStorage.setItem(DEC_KEY(), JSON.stringify(c)); } catch (e) { /* 忽略 */ }
         if (!ok) { await gpu.release(); return wasm; }
       }
       await wasm.release();
@@ -216,9 +226,12 @@
     return pts.length >= 3 ? pts : null;
   }
 
-  let msAvg = null;
-  try { msAvg = +localStorage.getItem('spraywall.samMs') || null; } catch (e) { /* 忽略 */ }
-  const msPerHold = () => (stats.decodes.length ? stats.decodes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, stats.decodes.length) : 0) || msAvg || (backend && backend !== 'wasm' ? 70 : 170);
+  let msAvg;   // 上次記下的每顆毫秒數：第一次用到才讀（configure 之後，keyPrefix 才對）
+  const savedMs = () => {
+    if (msAvg === undefined) { msAvg = null; try { msAvg = +localStorage.getItem(cfg.keyPrefix + 'samMs') || null; } catch (e) { /* 忽略 */ } }
+    return msAvg;
+  };
+  const msPerHold = () => (stats.decodes.length ? stats.decodes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, stats.decodes.length) : 0) || savedMs() || (backend && backend !== 'wasm' ? 70 : 170);
   async function refine(src, key, poly, status = () => {}, { box = null } = {}) {
     while (busy) await busy.catch(() => {});
     let done;
@@ -241,8 +254,8 @@
       for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) mask[y * rw + x] = m[(ry0 + y) * c.w + rx0 + x] > 0 ? 1 : 0;
       const pts = outline(mask, rw, rh, cx * s - rx0, cy * s - ry0);
       const ms = performance.now() - t0;
-      msAvg = msAvg ? msAvg * 0.9 + ms * 0.1 : ms;
-      try { localStorage.setItem('spraywall.samMs', String(Math.round(msAvg))); } catch (e) { /* 忽略 */ }
+      msAvg = savedMs() ? msAvg * 0.9 + ms * 0.1 : ms;
+      try { localStorage.setItem(cfg.keyPrefix + 'samMs', String(Math.round(msAvg))); } catch (e) { /* 忽略 */ }
       return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
     } finally { busy = null; done(); }
   }
@@ -291,7 +304,7 @@
   }
   function embDb() {
     return new Promise((ok, no) => {
-      const r = indexedDB.open('spraywall-sam', 1);
+      const r = indexedDB.open(cfg.db, 1);
       r.onupgradeneeded = () => r.result.createObjectStore('emb');
       r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
     });
@@ -354,10 +367,10 @@
     } finally { pbusy = null; done(); }
   }
 
-  // ---------- 雲端重描（試作）：手機整面牆一次送到 Firebase 雲端函式（functions/）算，照片只在伺服器記憶體裡算、不存檔 ----------
+  // ---------- 雲端重描（試作）：手機整面牆一次送到雲端函式（functions/ 的 retrace）算，照片只在伺服器記憶體裡算、不存檔 ----------
   // 照片縮到長邊 1024（模型的輸入大小）用 JPEG 傳；回傳的外框換回照片座標。stats.cloud 記各段時間（實測用）
-  const CLOUD_URL = 'https://asia-east1-climbio-spraywall.cloudfunctions.net/retrace', CLOUD_PARTS = 2;   // 同時 2 份：每份一台 8 vCPU，新專案每區的 CPU 配額開不了更多台
-  const cloudAvailable = () => !available() && !!(window.Nearby && window.Nearby.idToken) && navigator.onLine !== false;
+  const CLOUD_PARTS = 2;   // 同時 2 份：每份一台 8 vCPU，新專案每區的 CPU 配額開不了更多台
+  const cloudAvailable = () => !available() && !!(cfg.cloudUrl && cfg.idToken) && navigator.onLine !== false;
   async function refineCloud(src, items) {
     const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s);
     const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(src, 0, 0, w, h);
@@ -370,12 +383,12 @@
       return { id, box: [x0 * s, y0 * s, x1 * s, y1 * s], c: [cx / poly.length * s, cy / poly.length * s] };
     });
     // 分成最多 2 份同時送（雲端開 2 個執行個體一起算，每份各自分析一次照片，總時間約剩一半）；一份失敗就隔 2 秒重試一次
-    const token = await window.Nearby.idToken(), t0 = performance.now();
+    const token = await cfg.idToken(), t0 = performance.now();
     const parts = Math.max(1, Math.min(CLOUD_PARTS, Math.floor(holds.length / 40))), size = Math.ceil(holds.length / parts);
     const send = async (chunk) => {
       const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 290000);
       try {
-        const r = await fetch(CLOUD_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ img, holds: chunk }), signal: ac.signal });
+        const r = await fetch(cfg.cloudUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ img, holds: chunk }), signal: ac.signal });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return await r.json();
       } finally { clearTimeout(timer); }
@@ -387,5 +400,5 @@
     return res.flatMap(j => j.holds).map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
   }
 
-  window.HoldRefiner = { available, refine, msPerHold, tapAvailable, refineTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };
+  window.HoldRefiner = { configure, available, refine, msPerHold, tapAvailable, refineTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };
 })();

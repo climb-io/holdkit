@@ -1,0 +1,11 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "holdkit",
+      "runtime": "nodejs22",
+      "ignore": ["node_modules", ".git", "*.local"],
+      "predeploy": ["mkdir -p \"$RESOURCE_DIR/models\" && cp models/mobilesam-encoder.onnx models/mobilesam-decoder.onnx \"$RESOURCE_DIR/models/\""]
+    }
+  ]
+}

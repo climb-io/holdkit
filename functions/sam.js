@@ -1,25 +1,22 @@
 // 雲端重描輪廓（MobileSAM，CPU）：手機把長邊縮到 1024 的照片和要重描的岩點框送上來，在這裡分析一次照片、逐顆切出岩點，回傳新外框。
 // 跟 samrefine.js 同一套模型、同一種提示（只用框）和外輪廓追蹤，結果跟電腦版、手機版一樣。
-// 模型部署時從 web/models 複製進來（跟 App 同一份檔案，不另外進版控），載入後同一個執行個體留在記憶體。
+// 模型部署時從 models/ 複製進來（firebase.json 的 predeploy，同一份檔案不另外進版控），載入後同一個執行個體留在記憶體。
 const ort = require('onnxruntime-node');
 const sharp = require('sharp');
 
 const fs = require('fs');
 const path = require('path');
-const MODEL_BASE = 'https://climb-io.github.io/spraywall/web/models/';
 let sessions = null;
 const CPUS = Number(process.env.SAM_CPUS) || 8;
 
 async function loadModels() {
   if (sessions) return sessions;
   const t0 = Date.now();
-  // 部署時把 web/models 的模型複製進來（firebase.json 的 predeploy），冷啟動不用下載；本機測試沒有就從網站抓
+  // 部署時模型已經複製進 functions/models；本機測試沒有複製就直接讀 repo 的 models/
   const get = async (name) => {
-    const local = path.join(__dirname, 'models', name);
-    if (fs.existsSync(local)) return new Uint8Array(fs.readFileSync(local));
-    const r = await fetch(MODEL_BASE + name);
-    if (!r.ok) throw new Error(`model ${name}: HTTP ${r.status}`);
-    return new Uint8Array(await r.arrayBuffer());
+    const local = [path.join(__dirname, 'models', name), path.join(__dirname, '..', 'models', name)].find(f => fs.existsSync(f));
+    if (!local) throw new Error(`model ${name} not found`);
+    return new Uint8Array(fs.readFileSync(local));
   };
   const [e, d] = await Promise.all([get('mobilesam-encoder.onnx'), get('mobilesam-decoder.onnx')]);
   // 執行緒數照雲端函式分到的 vCPU（index.js 的 CPUS）：系統回報的核心數是整台主機的，照那個開會互搶，反而慢

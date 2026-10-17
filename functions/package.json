@@ -1,5 +1,5 @@
 {
-  "name": "spraywall-functions",
+  "name": "holdkit-functions",
   "private": true,
   "main": "index.js",
   "engines": { "node": "22" },

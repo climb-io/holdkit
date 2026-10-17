@@ -1,4 +1,4 @@
-// 雲端函式（試作）：手機重描整面牆的岩點輪廓。
+// 雲端函式 retrace（試作）：整面牆的岩點輪廓用 MobileSAM 重描（手機算太慢，送上來算）。
 // 要登入（Firebase 的 ID token，匿名也可以）才能用；照片只在記憶體裡算，不存檔。
 const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
