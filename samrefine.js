@@ -354,5 +354,38 @@
     } finally { pbusy = null; done(); }
   }
 
-  window.HoldRefiner = { available, refine, msPerHold, tapAvailable, refineTap, stats, get backend() { return backend; } };
+  // ---------- 雲端重描（試作）：手機整面牆一次送到 Firebase 雲端函式（functions/）算，照片只在伺服器記憶體裡算、不存檔 ----------
+  // 照片縮到長邊 1024（模型的輸入大小）用 JPEG 傳；回傳的外框換回照片座標。stats.cloud 記各段時間（實測用）
+  const CLOUD_URL = 'https://asia-east1-climbio-spraywall.cloudfunctions.net/retrace', CLOUD_PARTS = 2;   // 同時 2 份：每份一台 8 vCPU，新專案每區的 CPU 配額開不了更多台
+  const cloudAvailable = () => !available() && !!(window.Nearby && window.Nearby.idToken) && navigator.onLine !== false;
+  async function refineCloud(src, items) {
+    const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s);
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(src, 0, 0, w, h);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+    const img = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = () => no(fr.error); fr.readAsDataURL(blob); });
+    const holds = items.map(({ id, poly, box }) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx = 0, cy = 0;
+      for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
+      if (box) [x0, y0, x1, y1] = box;
+      return { id, box: [x0 * s, y0 * s, x1 * s, y1 * s], c: [cx / poly.length * s, cy / poly.length * s] };
+    });
+    // 分成最多 2 份同時送（雲端開 2 個執行個體一起算，每份各自分析一次照片，總時間約剩一半）；一份失敗就隔 2 秒重試一次
+    const token = await window.Nearby.idToken(), t0 = performance.now();
+    const parts = Math.max(1, Math.min(CLOUD_PARTS, Math.floor(holds.length / 40))), size = Math.ceil(holds.length / parts);
+    const send = async (chunk) => {
+      const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 290000);
+      try {
+        const r = await fetch(CLOUD_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ img, holds: chunk }), signal: ac.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      } finally { clearTimeout(timer); }
+    };
+    const retry = (chunk) => send(chunk).catch(() => new Promise(r => setTimeout(r, 2000)).then(() => send(chunk)));
+    const res = await Promise.all(Array.from({ length: parts }, (_, i) => retry(holds.slice(i * size, (i + 1) * size))));
+    stats.cloud = { load: Math.max(...res.map(j => j.ms.load)), encode: Math.max(...res.map(j => j.ms.encode)), decode: res.flatMap(j => j.ms.decode),
+      total: Math.max(...res.map(j => j.ms.total)), client: performance.now() - t0, kb: blob.size / 1024, n: items.length, parts };
+    return res.flatMap(j => j.holds).map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
+  }
+
+  window.HoldRefiner = { available, refine, msPerHold, tapAvailable, refineTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };
 })();
