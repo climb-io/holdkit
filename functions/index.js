@@ -6,12 +6,13 @@ const { refineAll } = require('./sam');
 
 admin.initializeApp();
 
-const ORIGINS = ['https://climb-io.github.io', 'http://localhost:8765'];
+const ORIGINS = ['https://climb-io.github.io', 'https://climbio.web.app', 'https://climbio.firebaseapp.com', 'http://localhost:8765'];
+const PREVIEW = /^https:\/\/climbio--[a-z0-9-]+\.web\.app$/;   // Hosting 預覽網址（測試用）
 const MAX_HOLDS = 3000, MAX_BYTES = 6e6;
 
 exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '4GiB', cpu: 8, timeoutSeconds: 300, concurrency: 1, maxInstances: 2 }, async (req, res) => {
   const origin = req.get('origin');
-  if (ORIGINS.includes(origin)) { res.set('Access-Control-Allow-Origin', origin); res.set('Vary', 'Origin'); }
+  if (ORIGINS.includes(origin) || PREVIEW.test(origin || '')) { res.set('Access-Control-Allow-Origin', origin); res.set('Vary', 'Origin'); }
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
     res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
