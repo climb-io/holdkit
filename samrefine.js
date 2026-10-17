@@ -247,5 +247,92 @@
     } finally { busy = null; done(); }
   }
 
-  window.HoldRefiner = { available, refine, msPerHold, get backend() { return backend; } };
+  // ---------- 手機試作：定線點到的岩點才重描（一次一顆），在 Worker 裡用 CPU 算 ----------
+  // 整張照片的特徵（約 4 MB）存在 IndexedDB（最近 3 張），同一張照片之後打開不用再分析。
+  // stats 記每一步花的時間，給使用者實測：download 下載模型、load 載入、encode 分析照片（0＝用存起來的）、decode 最近一顆重描
+  const CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+  const stats = { download: null, load: null, encode: null, decode: null };
+  let worker = null, wReady = null, wSeq = 0, onProg = null, pcache = null, pbusy = null;
+  const wWait = new Map();
+  const tapAvailable = () => !available() && typeof Worker !== 'undefined';
+  function call(msg, transfer = []) {
+    return new Promise((ok, no) => { const id = ++wSeq; wWait.set(id, { ok, no }); worker.postMessage({ ...msg, id }, transfer); });
+  }
+  function initWorker(status) {
+    if (wReady) return wReady;
+    worker = new Worker(new URL('samworker.js', base));
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'progress') { if (onProg) onProg(m.bytes); return; }
+      const p = wWait.get(m.id); if (!p) return;
+      wWait.delete(m.id);
+      if (m.error) p.no(new Error(m.error)); else p.ok(m);
+    };
+    worker.onerror = (e) => { for (const p of wWait.values()) p.no(new Error(e.message || 'worker')); wWait.clear(); };
+    onProg = (b) => status(T('samDownload', (b / 1e6).toFixed(0)), Math.min(1, b / 44.7e6));
+    status(T('samDownload', 0), 0);
+    wReady = call({ type: 'init', ort: CDN + 'ort.wasm.min.js', wasm: CDN, enc: ENC_URL, dec: DEC_URL })
+      .then(r => { stats.download = r.dl; stats.load = r.load; return r; })
+      .catch(e => { wReady = null; worker.terminate(); worker = null; throw e; });
+    return wReady;
+  }
+  function embDb() {
+    return new Promise((ok, no) => {
+      const r = indexedDB.open('spraywall-sam', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('emb');
+      r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
+    });
+  }
+  async function embGet(k) {
+    try { const db = await embDb(); return await new Promise(ok => { const q = db.transaction('emb').objectStore('emb').get(k); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); }); }
+    catch (e) { return null; }
+  }
+  async function embPut(k, emb) {
+    try {
+      const db = await embDb(), st = db.transaction('emb', 'readwrite').objectStore('emb');
+      st.put({ t: Date.now(), emb }, k);
+      const all = await new Promise(ok => { const out = []; const c = st.openCursor(); c.onsuccess = () => { const x = c.result; if (!x) return ok(out); out.push([x.key, x.value.t]); x.continue(); }; });
+      all.sort((a, b) => b[1] - a[1]).slice(3).forEach(([key]) => st.delete(key));   // 只留最近 3 張
+    } catch (e) { /* 存不了就下次再分析 */ }
+  }
+  async function ensurePhone(src, key, status) {
+    if (pcache && pcache.key === key && pcache.src === src) return pcache;
+    await initWorker(status);
+    const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s), ek = `${key}|${w}x${h}`;
+    const saved = await embGet(ek);
+    if (saved) { await call({ type: 'setEmb', emb: saved.emb }); stats.encode = 0; }
+    else {
+      status(T('samAnalyzing'), null);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(src, 0, 0, w, h);
+      const px = g.getImageData(0, 0, w, h).data, data = new Float32Array(w * h * 3);
+      for (let i = 0, j = 0; i < w * h; i++, j += 4) { data[i * 3] = px[j]; data[i * 3 + 1] = px[j + 1]; data[i * 3 + 2] = px[j + 2]; }
+      const r = await call({ type: 'embed', data, w, h }, [data.buffer]);
+      stats.encode = r.ms;
+      embPut(ek, r.emb);
+    }
+    pcache = { key, src, s, w, h };
+    return pcache;
+  }
+  async function refineTap(src, key, poly, status = () => {}) {
+    while (pbusy) await pbusy.catch(() => {});
+    let done;
+    pbusy = new Promise(r => { done = r; });
+    try {
+      const c = await ensurePhone(src, key, status);
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx = 0, cy = 0;
+      for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
+      cx /= poly.length; cy /= poly.length;
+      const s = c.s, g = Math.max(x1 - x0, y1 - y0) * s;
+      const rx0 = Math.max(0, Math.floor(x0 * s - g)), ry0 = Math.max(0, Math.floor(y0 * s - g));
+      const rx1 = Math.min(c.w, Math.ceil(x1 * s + g)), ry1 = Math.min(c.h, Math.ceil(y1 * s + g)), rw = rx1 - rx0, rh = ry1 - ry0;
+      if (rw < 3 || rh < 3) return null;
+      const r = await call({ type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } });
+      stats.decode = r.ms;
+      const pts = outline(r.mask, rw, rh, cx * s - rx0, cy * s - ry0);
+      return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
+    } finally { pbusy = null; done(); }
+  }
+
+  window.HoldRefiner = { available, refine, msPerHold, tapAvailable, refineTap, stats, get backend() { return backend; } };
 })();
