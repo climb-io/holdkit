@@ -52,7 +52,7 @@ if (HoldRefiner.available()) holds[0].poly = await HoldRefiner.refine(photoCanva
 
 ## 雲端重描
 
-`POST https://asia-east1-climbio-spraywall.cloudfunctions.net/retrace`
+`POST https://asia-east1-firebase-climbio.cloudfunctions.net/retrace`
 
 - 標頭：`Authorization: Bearer <Firebase ID token>`（匿名登入也可以）
 - 內容：`{ "img": "<JPEG base64，長邊 1024>", "holds": [{ "id", "box": [x0, y0, x1, y1], "c": [cx, cy] }] }`（座標是送上來的照片座標）
@@ -60,7 +60,7 @@ if (HoldRefiner.available()) holds[0].poly = await HoldRefiner.refine(photoCanva
 
 照片只在處理當下存在伺服器記憶體中，不存檔、不留紀錄。
 
-部署（Firebase 專案 climbio-spraywall，codebase `holdkit`）：
+部署（Firebase 專案 firebase-climbio，codebase `holdkit`）：
 
 ```bash
 cd functions && npm install && cd ..

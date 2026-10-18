@@ -11,8 +11,8 @@
 
 | repo | 做什麼 | 授權／可見性 | 部署到 |
 |---|---|---|---|
-| climb-io/spraywall | App **Climbio**：拍牆、岩點編輯、定線、看線、分享、同步、攀爬紀錄 | 保留所有權利，私人 | Firebase Hosting `climbio.web.app`（專案 `firebase-climbio`）；登入、Firestore、Storage 在 `climbio-spraywall` |
-| climb-io/holdscan | 岩點偵測：照片 → 岩點框（freeclimbs YOLOv8n） | AGPL-3.0，公開 | 雲端函式 `detect`（`climbio-spraywall`，asia-east1） |
+| climb-io/spraywall | App **Climbio**：拍牆、岩點編輯、定線、看線、分享、同步、攀爬紀錄 | 保留所有權利，私人 | Firebase 專案 `firebase-climbio`：Hosting `climbio.web.app`、登入、Firestore（資料庫 `climbio`）、Storage |
+| climb-io/holdscan | 岩點偵測：照片 → 岩點框（freeclimbs YOLOv8n） | AGPL-3.0，公開 | 雲端函式 `detect`（`firebase-climbio`，asia-east1） |
 | climb-io/holdkit | 岩點分析：框 → 外框、MobileSAM 重描、彩色範圍、顏色；岩點資料包格式（SPEC.md） | Apache-2.0，公開 | 雲端函式 `retrace`（同上）；App 依版本標記下載 |
 | climb-io/holdlab | 研究：實驗程式、評估、資料、結論（RESEARCH.md） | 私人 | 不部署 |
 
@@ -94,7 +94,7 @@
 |---|---|
 | 任何程式碼 | `node --check holdkit.js samrefine.js samworker.js functions/index.js functions/sam.js`；`node -e "require('./holdkit.js')"` |
 | 算法 | 在 spraywall 用實際的牆比較改前改後；規則調整用 holdlab 的評估腳本 |
-| 雲端函式 | 部署後 `curl -s -o /dev/null -w '%{http_code}' -X POST https://asia-east1-climbio-spraywall.cloudfunctions.net/retrace` 回 401，再從手機版 App 實際重描一次 |
+| 雲端函式 | 部署後 `curl -s -o /dev/null -w '%{http_code}' -X POST https://asia-east1-firebase-climbio.cloudfunctions.net/retrace` 回 401，再從手機版 App 實際重描一次 |
 
 ## 部署（雲端函式）
 
