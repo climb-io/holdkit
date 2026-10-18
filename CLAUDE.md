@@ -19,7 +19,7 @@
 - 本機路徑：`/Users/kantkang/work/climbio/<repo>`；雲端環境把需要的 repo clone 在同一層。
 - 資料流：spraywall 送照片給 holdscan 拿回框 → 用 holdkit 算外框、重描、彩色範圍，組成岩點資料包 → 存到 Firebase Storage。holdlab 的結論改進 holdscan／holdkit，再由 App 換版本採用。
 - **授權邊界（不能破）**：repo 之間只交換資料（框、岩點資料包），不互相引用程式。spraywall、holdkit 不能放任何 AGPL 程式或模型（放了就要跟著用 AGPL 公開）；holdkit 的模型只能用寬鬆授權的架構訓練。
-- **資料邊界**：研究程式和資料只放 holdlab。使用者上傳的照片、透過 Google API 拿到的資料不拿來訓練模型；訓練用的照片直接跟館方拿並取得同意。
+- **資料邊界**：研究程式和資料只放 holdlab。使用者的照片只有**分享出去的快照**（第一次分享前在 App 裡同意過，見 spraywall 的隱私權政策）可以拿來評估、訓練岩點偵測；沒分享的牆（含帳號同步的照片）和透過 Google API 拿到的資料（名稱、email）不拿來訓練模型。其他訓練用的照片直接跟館方拿並取得同意。
 
 ## 工作原則
 
