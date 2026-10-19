@@ -382,7 +382,7 @@
       if (box) [x0, y0, x1, y1] = box;
       return { id, box: [x0 * s, y0 * s, x1 * s, y1 * s], c: [cx / poly.length * s, cy / poly.length * s] };
     });
-    // 分成最多 2 份同時送（雲端開 2 個執行個體一起算，每份各自分析一次照片，總時間約剩一半）；一份失敗就隔 2 秒重試一次
+    // 分成最多 2 份同時送（雲端開 2 個執行個體一起算，每份各自分析一次照片，總時間約剩一半）
     const token = await cfg.idToken(), t0 = performance.now();
     const parts = Math.max(1, Math.min(CLOUD_PARTS, Math.floor(holds.length / 40))), size = Math.ceil(holds.length / parts);
     const send = async (chunk) => {
@@ -393,7 +393,13 @@
         return await r.json();
       } finally { clearTimeout(timer); }
     };
-    const retry = (chunk) => send(chunk).catch(() => new Promise(r => setTimeout(r, 2000)).then(() => send(chunk)));
+    // 失敗（多半是雲端一時開不出執行個體：HTTP 500「no available instance」或 429）等 3、6、12 秒再試；登入、請求本身的錯（400、401、413）重試也沒用
+    const retry = async (chunk) => {
+      for (let i = 0; ; i++) {
+        try { return await send(chunk); }
+        catch (e) { if (i >= 3 || /HTTP 4(00|01|13)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 3000 * 2 ** i)); }
+      }
+    };
     const res = await Promise.all(Array.from({ length: parts }, (_, i) => retry(holds.slice(i * size, (i + 1) * size))));
     stats.cloud = { load: Math.max(...res.map(j => j.ms.load)), encode: Math.max(...res.map(j => j.ms.encode)), decode: res.flatMap(j => j.ms.decode),
       total: Math.max(...res.map(j => j.ms.total)), client: performance.now() - t0, kb: blob.size / 1024, n: items.length, parts };
