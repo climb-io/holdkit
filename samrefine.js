@@ -369,8 +369,7 @@
 
   // ---------- 雲端重描（試作）：手機整面牆一次送到雲端函式（functions/ 的 retrace）算，照片只在伺服器記憶體裡算、不存檔 ----------
   // 照片縮到長邊 1024（模型的輸入大小）用 JPEG 傳；回傳的外框換回照片座標。stats.cloud 記各段時間（實測用）
-  // 大牆（CLOUD_SPLIT 顆以上）分 2 份同時送：拿得到第二個執行個體就兩台並行；拿不到時同一台也能同時接 2 份（雲端 concurrency 2），不會被擋。小牆一份
-  const CLOUD_SPLIT = 200;
+  // 整面牆一次送一份：分份同時送時常拿不到第二個執行個體，塞進同一台或新開的冷執行個體每顆都變慢，總時間沒有比較短
   const cloudAvailable = () => !available() && !!(cfg.cloudUrl && cfg.idToken) && navigator.onLine !== false;
   async function refineCloud(src, items) {
     const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s);
@@ -383,9 +382,7 @@
       if (box) [x0, y0, x1, y1] = box;
       return { id, box: [x0 * s, y0 * s, x1 * s, y1 * s], c: [cx / poly.length * s, cy / poly.length * s] };
     });
-    // 每份各自分析一次照片
     const token = await cfg.idToken(), t0 = performance.now();
-    const parts = holds.length >= CLOUD_SPLIT ? 2 : 1, size = Math.ceil(holds.length / parts);
     const send = async (chunk) => {
       const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 290000);
       try {
@@ -395,18 +392,13 @@
       } finally { clearTimeout(timer); }
     };
     // 失敗（多半是雲端一時開不出執行個體：HTTP 500「no available instance」或 429）等 3、6、12 秒再試；登入、請求本身的錯（400、401、413）重試也沒用
-    const retry = async (chunk) => {
-      for (let i = 0; ; i++) {
-        try { return await send(chunk); }
-        catch (e) { if (i >= 3 || /HTTP 4(00|01|13)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 3000 * 2 ** i)); }
-      }
-    };
-    // 第二份晚 3 秒送：冷啟動時兩份同時到，第二份會因為還沒有任何執行個體開好而被擋；晚一點送，第一台（可同時接 2 份）或第二台就接得住
-    const res = await Promise.all(Array.from({ length: parts }, (_, i) =>
-      new Promise(r => setTimeout(r, i * 3000)).then(() => retry(holds.slice(i * size, (i + 1) * size)))));
-    stats.cloud = { load: Math.max(...res.map(j => j.ms.load)), encode: Math.max(...res.map(j => j.ms.encode)), decode: res.flatMap(j => j.ms.decode),
-      total: Math.max(...res.map(j => j.ms.total)), client: performance.now() - t0, kb: blob.size / 1024, n: items.length, parts };
-    return res.flatMap(j => j.holds).map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
+    let j = null;
+    for (let i = 0; ; i++) {
+      try { j = await send(holds); break; }
+      catch (e) { if (i >= 3 || /HTTP 4(00|01|13)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 3000 * 2 ** i)); }
+    }
+    stats.cloud = { load: j.ms.load, encode: j.ms.encode, decode: j.ms.decode, total: j.ms.total, client: performance.now() - t0, kb: blob.size / 1024, n: items.length };
+    return j.holds.map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
   }
 
   window.HoldRefiner = { configure, available, refine, msPerHold, tapAvailable, refineTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };

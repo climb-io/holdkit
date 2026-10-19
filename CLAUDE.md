@@ -69,7 +69,7 @@
 |---|---|
 | `holdkit.js` | 分析函式（瀏覽器全域 `HoldKit`，Node 用 `require`）；`VERSION`、`MASK_VER` 在檔案開頭 |
 | `samrefine.js`、`samworker.js` | 瀏覽器的 MobileSAM 重描（全域 `HoldRefiner`） |
-| `functions/` | 雲端函式 `retrace`（asia-east1，8 vCPU，最多 2 個執行個體、每個同時接 2 份） |
+| `functions/` | 雲端函式 `retrace`（asia-east1，8 vCPU，最多 2 個執行個體、每個一次接一份） |
 | `models/` | MobileSAM 的 ONNX 模型與授權 |
 | `SPEC.md` | 岩點資料包格式 |
 

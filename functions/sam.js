@@ -8,9 +8,6 @@ const fs = require('fs');
 const path = require('path');
 let sessions = null;
 const CPUS = Number(process.env.SAM_CPUS) || 8;
-// 一個執行個體可以同時接 2 份（index.js 的 concurrency），模型共用。解碼器個數 DEC（各用 CPUS / DEC 核）：
-// 雲端 1 個最快（共用的 vCPU 開 2 個反而互搶，每顆變慢），SAM_DEC 留給實測
-const DEC = Number(process.env.SAM_DEC) || 1;
 
 async function loadModels() {
   if (sessions) return sessions;
@@ -24,9 +21,7 @@ async function loadModels() {
   const [e, d] = await Promise.all([get('mobilesam-encoder.onnx'), get('mobilesam-decoder.onnx')]);
   // 執行緒數照雲端函式分到的 vCPU（index.js 的 CPUS）：系統回報的核心數是整台主機的，照那個開會互搶，反而慢
   const opt = { executionProviders: ['cpu'], graphOptimizationLevel: 'all', intraOpNumThreads: CPUS, interOpNumThreads: 1 };
-  const dopt = { ...opt, intraOpNumThreads: Math.max(1, Math.round(CPUS / DEC)) };
-  const decs = []; for (let i = 0; i < DEC; i++) decs.push(await ort.InferenceSession.create(d, dopt));
-  sessions = { enc: await ort.InferenceSession.create(e, opt), decs, loadMs: Date.now() - t0 };
+  sessions = { enc: await ort.InferenceSession.create(e, opt), dec: await ort.InferenceSession.create(d, opt), loadMs: Date.now() - t0 };
   return sessions;
 }
 
@@ -77,36 +72,32 @@ async function refineAll(jpeg, holds) {
   for (let i = 0; i < input.length; i++) input[i] = data[i];
   const t0 = Date.now();
   const emb = (await s.enc.run({ input_image: new ort.Tensor('float32', input, [h, w, 3]) })).image_embeddings;
-  const encode = Date.now() - t0, decode = new Array(holds.length), out = new Array(holds.length);
-  // 每個解碼器輪流拿下一顆；結果照原本的順序放
-  let next = 0;
-  await Promise.all(s.decs.map(async (dec) => {
-    for (let i = next++; i < holds.length; i = next++) {
-      const hd = holds[i], t1 = Date.now();
-      const [x0, y0, x1, y1] = hd.box;
-      const r = await dec.run({
-        image_embeddings: emb,
-        point_coords: new ort.Tensor('float32', new Float32Array([x0, y0, x1, y1]), [1, 2, 2]),
-        point_labels: new ort.Tensor('float32', new Float32Array([2, 3]), [1, 2]),
-        mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
-        has_mask_input: new ort.Tensor('float32', new Float32Array([0]), [1]),
-        orig_im_size: new ort.Tensor('float32', new Float32Array([h, w]), [2]),
-      });
-      // 只看框外擴一倍的範圍（跟 samrefine.js 一樣）
-      const m = r.masks.data, g = Math.max(x1 - x0, y1 - y0);
-      const rx0 = Math.max(0, Math.floor(x0 - g)), ry0 = Math.max(0, Math.floor(y0 - g));
-      const rx1 = Math.min(w, Math.ceil(x1 + g)), ry1 = Math.min(h, Math.ceil(y1 + g)), rw = rx1 - rx0, rh = ry1 - ry0;
-      let poly = null;
-      if (rw >= 3 && rh >= 3) {
-        const mask = new Uint8Array(rw * rh);
-        for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) mask[y * rw + x] = m[(ry0 + y) * w + rx0 + x] > 0 ? 1 : 0;
-        const pts = outline(mask, rw, rh, hd.c[0] - rx0, hd.c[1] - ry0);
-        if (pts) poly = pts.map(([x, y]) => [x + rx0 + 0.5, y + ry0 + 0.5]);
-      }
-      out[i] = { id: hd.id, poly };
-      decode[i] = Date.now() - t1;
+  const encode = Date.now() - t0, decode = [], out = [];
+  for (const hd of holds) {
+    const t1 = Date.now();
+    const [x0, y0, x1, y1] = hd.box;
+    const r = await s.dec.run({
+      image_embeddings: emb,
+      point_coords: new ort.Tensor('float32', new Float32Array([x0, y0, x1, y1]), [1, 2, 2]),
+      point_labels: new ort.Tensor('float32', new Float32Array([2, 3]), [1, 2]),
+      mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
+      has_mask_input: new ort.Tensor('float32', new Float32Array([0]), [1]),
+      orig_im_size: new ort.Tensor('float32', new Float32Array([h, w]), [2]),
+    });
+    // 只看框外擴一倍的範圍（跟 samrefine.js 一樣）
+    const m = r.masks.data, g = Math.max(x1 - x0, y1 - y0);
+    const rx0 = Math.max(0, Math.floor(x0 - g)), ry0 = Math.max(0, Math.floor(y0 - g));
+    const rx1 = Math.min(w, Math.ceil(x1 + g)), ry1 = Math.min(h, Math.ceil(y1 + g)), rw = rx1 - rx0, rh = ry1 - ry0;
+    let poly = null;
+    if (rw >= 3 && rh >= 3) {
+      const mask = new Uint8Array(rw * rh);
+      for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) mask[y * rw + x] = m[(ry0 + y) * w + rx0 + x] > 0 ? 1 : 0;
+      const pts = outline(mask, rw, rh, hd.c[0] - rx0, hd.c[1] - ry0);
+      if (pts) poly = pts.map(([x, y]) => [x + rx0 + 0.5, y + ry0 + 0.5]);
     }
-  }));
+    out.push({ id: hd.id, poly });
+    decode.push(Date.now() - t1);
+  }
   return { holds: out, ms: { load: first, encode, decode }, cpus: [CPUS, require('os').cpus().length] };
 }
 

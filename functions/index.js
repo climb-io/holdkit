@@ -10,7 +10,7 @@ const ORIGINS = ['https://climb-io.github.io', 'https://climbio.web.app', 'https
 const PREVIEW = /^https:\/\/climbio--[a-z0-9-]+\.web\.app$/;   // Hosting 預覽網址（測試用）
 const MAX_HOLDS = 3000, MAX_BYTES = 6e6;
 
-exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '4GiB', cpu: 8, timeoutSeconds: 300, concurrency: 2, maxInstances: 2 }, async (req, res) => {
+exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '4GiB', cpu: 8, timeoutSeconds: 300, concurrency: 1, maxInstances: 2 }, async (req, res) => {
   const origin = req.get('origin');
   if (ORIGINS.includes(origin) || PREVIEW.test(origin || '')) { res.set('Access-Control-Allow-Origin', origin); res.set('Vary', 'Origin'); }
   if (req.method === 'OPTIONS') {

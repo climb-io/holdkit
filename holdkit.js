@@ -17,7 +17,7 @@
   else root.HoldKit = HK;
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
 
   // ---------- 幾何 ----------
   function bbox(poly) {
