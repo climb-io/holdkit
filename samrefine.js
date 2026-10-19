@@ -401,7 +401,9 @@
         catch (e) { if (i >= 3 || /HTTP 4(00|01|13)/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 3000 * 2 ** i)); }
       }
     };
-    const res = await Promise.all(Array.from({ length: parts }, (_, i) => retry(holds.slice(i * size, (i + 1) * size))));
+    // 第二份晚 3 秒送：冷啟動時兩份同時到，第二份會因為還沒有任何執行個體開好而被擋；晚一點送，第一台（可同時接 2 份）或第二台就接得住
+    const res = await Promise.all(Array.from({ length: parts }, (_, i) =>
+      new Promise(r => setTimeout(r, i * 3000)).then(() => retry(holds.slice(i * size, (i + 1) * size)))));
     stats.cloud = { load: Math.max(...res.map(j => j.ms.load)), encode: Math.max(...res.map(j => j.ms.encode)), decode: res.flatMap(j => j.ms.decode),
       total: Math.max(...res.map(j => j.ms.total)), client: performance.now() - t0, kb: blob.size / 1024, n: items.length, parts };
     return res.flatMap(j => j.holds).map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
