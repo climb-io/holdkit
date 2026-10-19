@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 let sessions = null;
 const CPUS = Number(process.env.SAM_CPUS) || 8;
-// 解碼同時跑幾顆：每顆解碼很小，一顆用滿 8 核用不完；開 DEC 個解碼器、各用 CPUS / DEC 核，同時切不同的岩點（超過 2 個反而變慢）
+// 一個執行個體可以同時接 2 份（index.js 的 concurrency），模型共用。解碼同時跑幾顆：每顆解碼很小，一顆用滿 8 核用不完；開 DEC 個解碼器、各用 CPUS / DEC 核，同時切不同的岩點（超過 2 個反而變慢）
 const DEC = Number(process.env.SAM_DEC) || 2;
 
 async function loadModels() {
