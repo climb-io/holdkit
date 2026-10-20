@@ -6,7 +6,7 @@ const { refineAll } = require('./sam');
 
 admin.initializeApp();
 
-const ORIGINS = ['https://climb-io.github.io', 'https://climbio.web.app', 'https://climbio.firebaseapp.com', 'http://localhost:8765', 'http://127.0.0.1:8765'];
+const ORIGINS = ['https://climb-io.github.io', 'https://climbio.web.app', 'https://climbio-dev.web.app', 'https://climbio.firebaseapp.com', 'http://localhost:8765', 'http://127.0.0.1:8765'];
 const PREVIEW = /^https:\/\/climbio--[a-z0-9-]+\.web\.app$/;   // Hosting 預覽網址（測試用）
 const MAX_HOLDS = 3000, MAX_BYTES = 6e6;
 
