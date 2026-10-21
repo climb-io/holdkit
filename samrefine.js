@@ -265,7 +265,7 @@
   // stats 記每一步花的時間，給使用者實測：download 下載模型、load 載入、encode 分析照片（0＝用存起來的）、decode 最近一顆重描
   const CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
   const stats = { download: null, load: null, encode: null, decode: null, decodes: [] };
-  let worker = null, wReady = null, wSeq = 0, onProg = null, pcache = null, pbusy = null;
+  let worker = null, wReady = null, wSeq = 0, onProg = null, pcache = null, pbusy = null, curStatus = () => {};   // curStatus：目前在等的那一次的進度回報（先在背景準備、之後才有人等也看得到下載進度）
   const wWait = new Map();
   const tapAvailable = () => !available() && typeof Worker !== 'undefined';
   // Worker 當掉（例如手機記憶體不足被系統關掉）或太久沒回應：整個重來，下次用到再重新載入；等著的都回報錯誤，不會卡住
@@ -294,7 +294,8 @@
       if (m.error) p.no(new Error(m.error)); else p.ok(m);
     };
     worker.onerror = (e) => resetWorker(new Error(e.message || T('samTimeout')));
-    onProg = (b) => status(T('samDownload', (b / 1e6).toFixed(0)), Math.min(1, b / 44.7e6));
+    curStatus = status;
+    onProg = (b) => curStatus(T('samDownload', (b / 1e6).toFixed(0)), Math.min(1, b / 44.7e6));
     status(T('samDownload', 0), 0);
     const ready = call({ type: 'init', ort: CDN + 'ort.wasm.min.js', wasm: CDN, enc: ENC_URL, dec: DEC_URL }, [], 10 * 60000)   // 下載 45 MB：慢的網路給 10 分鐘
       .then(r => { stats.download = r.dl; stats.load = r.load; return r; })
@@ -328,13 +329,14 @@
     } catch (e) { /* 存不了就下次再分析 */ }
   }
   async function ensurePhone(src, key, status) {
+    curStatus = status;
     if (pcache && pcache.key === key && pcache.src === src) return pcache;
     await initWorker(status);
     const s = SIDE / Math.max(src.width, src.height), w = Math.round(src.width * s), h = Math.round(src.height * s), ek = `${key}|${w}x${h}`;
     const saved = await embGet(ek);
     if (saved) { await call({ type: 'setEmb', emb: saved.emb }); stats.encode = 0; }   // 存起來的照片特徵
     else {
-      status(T('samAnalyzing'), null);
+      curStatus(T('samAnalyzing'), null);
       const c = document.createElement('canvas'); c.width = w; c.height = h;
       const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(src, 0, 0, w, h);
       const px = g.getImageData(0, 0, w, h).data, data = new Float32Array(w * h * 3);
@@ -346,25 +348,43 @@
     pcache = { key, src, s, w, h };
     return pcache;
   }
-  async function refineTap(src, key, poly, status = () => {}, { box = null } = {}) {
+  // point：[x, y]（照片座標）用一個點當提示（沒偵測到的岩點：使用者點在岩點上），找這一點附近的範圍；poly 不用
+  async function refineTap(src, key, poly, status = () => {}, { box = null, point = null } = {}) {
+    curStatus = status;
     while (pbusy) await pbusy.catch(() => {});
     let done;
     pbusy = new Promise(r => { done = r; });
     try {
       const c = await ensurePhone(src, key, status);
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx = 0, cy = 0;
-      for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
-      cx /= poly.length; cy /= poly.length;
-      if (box) [x0, y0, x1, y1] = box;
-      const s = c.s, g = Math.max(x1 - x0, y1 - y0) * s;
+      const s = c.s;
+      let x0, y0, x1, y1, cx, cy, g;
+      if (point) {
+        [cx, cy] = point; x0 = x1 = cx; y0 = y1 = cy;
+        g = Math.max(c.w, c.h) * 0.15;   // 一個點：岩點多大不知道，找附近長邊 15% 的範圍（大顆的量體也夠）
+      } else {
+        x0 = Infinity; y0 = Infinity; x1 = -Infinity; y1 = -Infinity; cx = 0; cy = 0;
+        for (const [x, y] of poly) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
+        cx /= poly.length; cy /= poly.length;
+        if (box) [x0, y0, x1, y1] = box;
+        g = Math.max(x1 - x0, y1 - y0) * s;
+      }
       const rx0 = Math.max(0, Math.floor(x0 * s - g)), ry0 = Math.max(0, Math.floor(y0 * s - g));
       const rx1 = Math.min(c.w, Math.ceil(x1 * s + g)), ry1 = Math.min(c.h, Math.ceil(y1 * s + g)), rw = rx1 - rx0, rh = ry1 - ry0;
       if (rw < 3 || rh < 3) return null;
-      const r = await call({ type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } }, [], 60000);
+      const r = await call(point ? { type: 'decode', point: [cx * s, cy * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } }
+        : { type: 'decode', box: [x0 * s, y0 * s, x1 * s, y1 * s], w: c.w, h: c.h, region: { rx0, ry0, rw, rh } }, [], 60000);
       stats.decode = r.ms; stats.decodes.push(r.ms);
       const pts = outline(r.mask, rw, rh, cx * s - rx0, cy * s - ry0);
       return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
     } finally { pbusy = null; done(); }
+  }
+  // 先在背景準備好（下載模型、分析這張照片），之後第一次重描不用等；失敗就算了（用到時再試）
+  async function warmTap(src, key) {
+    if (!tapAvailable()) return;
+    while (pbusy) await pbusy.catch(() => {});
+    let done;
+    pbusy = new Promise(r => { done = r; });
+    try { await ensurePhone(src, key, () => {}); } catch (e) { /* 用到時再試 */ } finally { pbusy = null; done(); }
   }
 
   // ---------- 雲端重描（試作）：手機整面牆一次送到雲端函式（functions/ 的 retrace）算，照片只在伺服器記憶體裡算、不存檔 ----------
@@ -401,5 +421,5 @@
     return j.holds.map(x => ({ id: x.id, poly: x.poly ? x.poly.map(([px, py]) => [+(px / s).toFixed(1), +(py / s).toFixed(1)]) : null }));
   }
 
-  window.HoldRefiner = { configure, available, refine, msPerHold, tapAvailable, refineTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };
+  window.HoldRefiner = { configure, available, refine, msPerHold, tapAvailable, refineTap, warmTap, cloudAvailable, refineCloud, stats, get backend() { return backend; } };
 })();

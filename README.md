@@ -41,6 +41,10 @@ HoldKit.colorName(px.h0.c);   // '紅'、'藍'…（COLOR 的 key）
 // MobileSAM 重描（電腦）
 HoldRefiner.configure({ t: myTranslate });               // 選用：訊息翻譯、localStorage／IndexedDB 名稱、雲端網址
 if (HoldRefiner.available()) holds[0].poly = await HoldRefiner.refine(photoCanvas, wallId, holds[0].poly, console.log, { box: boxes[0] });
+
+// MobileSAM 重描（手機，Worker 用 CPU）：框當提示，或沒偵測到的岩點用一個點當提示；warmTap 先在背景下載模型、分析照片
+HoldRefiner.warmTap(photoCanvas, wallId);
+const poly = await HoldRefiner.refineTap(photoCanvas, wallId, null, console.log, { point: [x, y] });
 ```
 
 `holdEntry` 要畫布：瀏覽器用 `document.createElement('canvas')`，Worker 用 `OffscreenCanvas`，Node 傳 `createCanvas`（例如 node-canvas）。

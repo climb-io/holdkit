@@ -3,7 +3,7 @@
 //   init { ort, wasm, enc, dec }   載入 onnxruntime（只有 CPU 的版本）、下載兩個模型；下載中回報 { type: 'progress', bytes }
 //   embed { data, w, h }           整張照片（長邊 1024，HWC、0–255）→ 特徵，記在 Worker 裡，也回傳一份給主程式存起來
 //   setEmb { emb }                 用存起來的特徵（同一張照片不用再分析）
-//   decode { box, w, h, region }   框當提示切出岩點，只回傳 region 範圍的遮罩（Uint8Array）
+//   decode { box | point, w, h, region }   框（或一個點：沒偵測到的岩點，點在岩點上）當提示切出岩點，只回傳 region 範圍的遮罩（Uint8Array）
 let enc = null, dec = null, emb = null;
 
 async function fetchModel(url, got, report) {
@@ -51,8 +51,9 @@ const handlers = {
     const t0 = performance.now();
     const out = await dec.run({
       image_embeddings: new ort.Tensor('float32', emb, [1, 256, 64, 64]),
-      point_coords: new ort.Tensor('float32', new Float32Array(m.box), [1, 2, 2]),
-      point_labels: new ort.Tensor('float32', new Float32Array([2, 3]), [1, 2]),
+      // 框：左上、右下兩點（標記 2、3）；一個點：前景點（1）加一個補位的點（-1，沒有框時模型要的）
+      point_coords: new ort.Tensor('float32', new Float32Array(m.point ? [m.point[0], m.point[1], 0, 0] : m.box), [1, 2, 2]),
+      point_labels: new ort.Tensor('float32', new Float32Array(m.point ? [1, -1] : [2, 3]), [1, 2]),
       mask_input: new ort.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
       has_mask_input: new ort.Tensor('float32', new Float32Array([0]), [1]),
       orig_im_size: new ort.Tensor('float32', new Float32Array([m.h, m.w]), [2]),
