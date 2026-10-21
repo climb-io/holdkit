@@ -378,13 +378,16 @@
       return pts ? pts.map(([x, y]) => [+((x + rx0 + 0.5) / s).toFixed(1), +((y + ry0 + 0.5) / s).toFixed(1)]) : null;
     } finally { pbusy = null; done(); }
   }
-  // 先在背景準備好（下載模型、分析這張照片），之後第一次重描不用等；失敗就算了（用到時再試）
-  async function warmTap(src, key) {
+  // 背景準備：不帶照片只下載、載入模型；有照片再分析。失敗留到實際使用時重試。
+  async function warmTap(src = null, key = null) {
     if (!tapAvailable()) return;
     while (pbusy) await pbusy.catch(() => {});
     let done;
     pbusy = new Promise(r => { done = r; });
-    try { await ensurePhone(src, key, () => {}); } catch (e) { /* 用到時再試 */ } finally { pbusy = null; done(); }
+    try {
+      if (src) await ensurePhone(src, key, () => {});
+      else await initWorker(() => {});
+    } catch (e) { /* 用到時再試 */ } finally { pbusy = null; done(); }
   }
 
   // ---------- 雲端重描（試作）：手機整面牆一次送到雲端函式（functions/ 的 retrace）算，照片只在伺服器記憶體裡算、不存檔 ----------

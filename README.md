@@ -43,6 +43,7 @@ HoldRefiner.configure({ t: myTranslate });               // 選用：訊息翻�
 if (HoldRefiner.available()) holds[0].poly = await HoldRefiner.refine(photoCanvas, wallId, holds[0].poly, console.log, { box: boxes[0] });
 
 // MobileSAM 重描（手機，Worker 用 CPU）：框當提示，或沒偵測到的岩點用一個點當提示；warmTap 先在背景下載模型、分析照片
+HoldRefiner.warmTap();                                 // 還沒選照片：只下載、載入模型
 HoldRefiner.warmTap(photoCanvas, wallId);
 const poly = await HoldRefiner.refineTap(photoCanvas, wallId, null, console.log, { point: [x, y] });
 ```
