@@ -63,7 +63,7 @@ function outline(mask, w, h, cx, cy) {
 }
 
 // jpeg：長邊 1024 的照片；holds：[{ id, box: [x0, y0, x1, y1], c: [cx, cy] }]（都在這張照片的座標）
-// 回傳 { holds: [{ id, poly }]（同一個座標，poly 是 null 表示切不出來）, ms: { load, encode, decode: [...] } }
+// 回傳 { holds: [{ id, poly }]（同一個座標，poly 是 null 表示切不出來）, emb: 照片特徵, ms: { load, encode, decode: [...] } }；holds 可以是空的（只要照片特徵）
 async function refineAll(jpeg, holds) {
   const s = await loadModels(), first = s.loadMs;
   s.loadMs = 0;   // 只有冷啟動那次要算下載、載入
@@ -73,6 +73,15 @@ async function refineAll(jpeg, holds) {
   const t0 = Date.now();
   const emb = (await s.enc.run({ input_image: new ort.Tensor('float32', input, [h, w, 3]) })).image_embeddings;
   const encode = Date.now() - t0, decode = [], out = [];
+  // 照片特徵也回傳（int8：每個通道 lo + q × sc，約 1 MB），手機存起來之後單顆重描只跑解碼器（samrefine.js）
+  const ed = emb.data, N = 64 * 64, q = Buffer.alloc(256 * N), lo = [], sc = [];
+  for (let c = 0; c < 256; c++) {
+    let a = Infinity, b = -Infinity;
+    for (let k = c * N; k < (c + 1) * N; k++) { a = Math.min(a, ed[k]); b = Math.max(b, ed[k]); }
+    const step = (b - a) / 255 || 1;
+    for (let k = c * N; k < (c + 1) * N; k++) q[k] = Math.round((ed[k] - a) / step);
+    lo.push(a); sc.push(step);
+  }
   for (const hd of holds) {
     const t1 = Date.now();
     const [x0, y0, x1, y1] = hd.box;
@@ -98,7 +107,7 @@ async function refineAll(jpeg, holds) {
     out.push({ id: hd.id, poly });
     decode.push(Date.now() - t1);
   }
-  return { holds: out, ms: { load: first, encode, decode }, cpus: [CPUS, require('os').cpus().length] };
+  return { holds: out, emb: { q: q.toString('base64'), lo, sc, w, h }, ms: { load: first, encode, decode }, cpus: [CPUS, require('os').cpus().length] };
 }
 
 module.exports = { refineAll };

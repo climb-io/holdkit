@@ -11,4 +11,4 @@
 
 - 權重：[MobileSAM](https://github.com/ChaoningZhang/MobileSAM)（Chaoning Zhang 等），Apache-2.0，授權全文見 `LICENSE-MobileSAM`。
 - ONNX：取自 [Acly/MobileSAM](https://huggingface.co/Acly/MobileSAM)（MIT），encoder 用該 repo 的 `export_image_encoder.py`、decoder 用 MobileSAM 的 `export_models.py` 匯出；本專案未修改模型，只改了檔名（`mobile_sam_image_encoder.onnx`、`sam_mask_decoder_single.onnx`）。
-- 電腦版在瀏覽器裡跑（第一次重描時下載約 45 MB）；手機改送雲端函式（`functions/`）算，雲端失敗才在手機的 Worker 裡用 CPU 算（手機 GPU 實測會算錯）。
+- encoder 只在雲端函式（`functions/`）跑：分析照片、整面牆重描，照片特徵回傳給瀏覽器存著；瀏覽器只下載 decoder（約 16 MB），在 Worker 裡用 CPU 解碼（手機 GPU 實測分析照片會算錯，解碼也只快約 25%）。

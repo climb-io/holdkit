@@ -1,4 +1,4 @@
-// 雲端函式 retrace（試作）：整面牆的岩點輪廓用 MobileSAM 重描（手機算太慢，送上來算）。
+// 雲端函式 retrace：分析照片（MobileSAM 的 encoder，手機算太慢），整面牆的岩點輪廓一次重描，照片特徵也回傳給 App 存起來（之後單顆重描只跑解碼器）。
 // 要登入（Firebase 的 ID token，匿名也可以）才能用；照片只在記憶體裡算，不存檔。
 const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
@@ -26,7 +26,7 @@ exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '
   } catch (e) { return res.status(401).json({ error: 'not signed in' }); }
   try {
     const { img, holds } = req.body || {};
-    if (typeof img !== 'string' || !Array.isArray(holds) || !holds.length || holds.length > MAX_HOLDS) return res.status(400).json({ error: 'bad request' });
+    if (typeof img !== 'string' || !Array.isArray(holds) || holds.length > MAX_HOLDS) return res.status(400).json({ error: 'bad request' });
     const jpeg = Buffer.from(img, 'base64');
     if (jpeg.length > MAX_BYTES) return res.status(413).json({ error: 'image too large' });
     const ok = (v, n) => Array.isArray(v) && v.length === n && v.every(Number.isFinite);
@@ -36,7 +36,7 @@ exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '
     r.ms.total = Date.now() - t0;
     // 只記數字（岩點數、各段耗時），不記照片和座標：用來看每顆岩點要多久
     const dec = r.ms.decode.reduce((a, b) => a + b, 0);
-    console.log(JSON.stringify({ retrace: { n: holds.length, load: r.ms.load, encode: r.ms.encode, decode: dec, perHold: Math.round(dec / holds.length), total: r.ms.total } }));
+    console.log(JSON.stringify({ retrace: { n: holds.length, load: r.ms.load, encode: r.ms.encode, decode: dec, perHold: holds.length ? Math.round(dec / holds.length) : 0, total: r.ms.total } }));
     res.json(r);
   } catch (e) {
     console.error(e);
