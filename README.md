@@ -76,6 +76,8 @@ cd functions && npm install && cd ..
 npx firebase-tools deploy --only functions:holdkit
 ```
 
+沒有本機 Firebase 登入時（例如雲端工作階段），用 spraywall 的 GitHub Actions 從本 repo 的 `main` 部署：`gh workflow run firebase.yml --repo climb-io/spraywall --ref main -f only=functions:holdkit`。
+
 predeploy 把 `models/` 的兩個模型複製進 `functions/models/`；`functions/.npmrc` 關掉 onnxruntime-node 安裝時下載 GPU（CUDA）版本。
 
 ## 授權
