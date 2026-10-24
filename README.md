@@ -67,6 +67,8 @@ HoldRefiner.forget(wallId);                            // 刪掉這張照片的�
 - 回傳：`{ "holds": [{ "id", "poly" }], "emb": { "q": "<base64，256×64×64 個 uint8>", "lo": [256], "sc": [256], "w", "h" }, "ms": {...} }`
   - `emb` 是照片特徵（MobileSAM 的 image_embeddings），每個通道 `lo + q × sc`（int8 量化，跟 float32 解碼出來的遮罩 IoU 平均 0.999）；`w`、`h` 是送上來的照片大小
 
+`GET` 同一個網址＝預熱：執行個體開機、載入模型後回 204（不帶資料、不用登入）。App 在使用者選照片時先送一個，等真的送整面牆來就不用再等冷啟動。
+
 照片只在處理當下存在伺服器記憶體中，不存檔、不留紀錄。
 
 部署（Firebase 專案 firebase-climbio，codebase `holdkit`）：

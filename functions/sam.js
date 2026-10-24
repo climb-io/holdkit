@@ -84,4 +84,7 @@ async function refineAll(jpeg, holds) {
   return { holds: out, emb: { q: q.toString('base64'), lo, sc, w, h }, ms: { load: first, encode, decode }, cpus: [CPUS, require('os').cpus().length] };
 }
 
-module.exports = { refineAll };
+// 預熱（index.js 的 GET）：先載入模型，載入時間不算進下一份重描
+async function warm() { (await loadModels()).loadMs = 0; }
+
+module.exports = { refineAll, warm };
