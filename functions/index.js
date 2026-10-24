@@ -35,7 +35,7 @@ exports.retrace = onRequest({ region: 'asia-east1', invoker: 'public', memory: '
     const r = await refineAll(jpeg, holds);
     r.ms.total = Date.now() - t0;
     // 只記數字（岩點數、各段耗時），不記照片和座標：用來看每顆岩點要多久
-    const dec = r.ms.decode.reduce((a, b) => a + b, 0);
+    const dec = r.ms.decode;
     console.log(JSON.stringify({ retrace: { n: holds.length, load: r.ms.load, encode: r.ms.encode, decode: dec, perHold: holds.length ? Math.round(dec / holds.length) : 0, total: r.ms.total } }));
     res.json(r);
   } catch (e) {
