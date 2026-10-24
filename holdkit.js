@@ -1,15 +1,12 @@
-// holdkit：岩點階段的分析（偵測框 → 外框、彩色範圍、代表色、色調），Apache-2.0。
+// holdkit：岩點階段的分析（偵測框 → 外框、顏色），Apache-2.0。
 // 不依賴任何 App 的狀態：照片、框、外框都從參數傳入。瀏覽器用 <script src="holdkit.js"> 載入成全域 HoldKit；
-// Node 用 require('./holdkit.js')（holdEntry 要畫布，傳 ctx.createCanvas，例如 node-canvas 的 createCanvas）。
+// Node 用 require('./holdkit.js')（analysis 要畫布，傳 createCanvas，例如 node-canvas 的 createCanvas）。
 //
 // 主要介面（座標都是照片像素；外框 poly＝[[x, y], ...]）：
 //   analysis(img, W, H)                 → 分析用縮圖 { data, w, h, s }（長邊最多 1200）
 //   outlineContext(ana, boxes)          → 辨識外框用的資料（整張 Lab、每個像素被幾個框蓋到）
 //   boxToPoly(x0, y0, x1, y1, octx)     → 偵測框 → 岩點外框（凸包；失敗時是框的內切橢圓）
 //   simplifyPoly(poly)                  → 外框精簡
-//   holdEntry(hold, { img, W, H, holds }) → 岩點資料包的一筆（彩色範圍或 none、代表色 c、色調 t；不含 s）
-//   maskSig(poly)                       → 外框指紋 s（外框改了就要重算）
-//   cleanPx(px)                         → 檢查、清理收到的 px（格式見 SPEC.md）
 //   colorName(c)、COLOR、SAME_DE        → 選同色用
 (function (root, factory) {
   const HK = factory();
@@ -17,7 +14,7 @@
   else root.HoldKit = HK;
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  const VERSION = '1.7.0';
+  const VERSION = '1.8.0';
 
   // ---------- 幾何 ----------
   function bbox(poly) {
@@ -179,30 +176,6 @@
     for (let y = 0; y < bh; y++) out.set(c.subarray((y + r) * W + r, (y + r) * W + r + bw), y * bw);
     return out;
   }
-  // 遮罩壓縮：0、1 交錯的連續長度（從 0 開始），36 進位用逗號接起來
-  function encodeRuns(on) {
-    const out = []; let v = 0, n = 0;
-    for (let p = 0; p < on.length; p++) { if (on[p] !== v) { out.push(n.toString(36)); v = on[p]; n = 0; } n++; }
-    out.push(n.toString(36));
-    return out.join(',');
-  }
-  // encodeRuns 的反向：長度 n 的 0／1 陣列
-  function decodeRuns(r, n) {
-    const a = new Uint8Array(n);
-    let p = 0, v = 0;
-    for (const s of r.split(',')) { const k = parseInt(s, 36); if (v) a.fill(1, p, p + k); p += k; v ^= 1; }
-    return a;
-  }
-  // 外框指紋：只看這顆岩點自己的外框（隔壁岩點改了影響很小，不重算）。算法改了就加 MASK_VER，舊的資料全部重算
-  // 版本：2＝手動改過、手畫、MobileSAM 重描過的岩點整個外框都上色（不做顏色判斷）
-  // 3＝每筆加上代表色 c、色調 t（整面牆在岩點階段就算好）；4＝深處被判成板子太多就整個外框上色
-  const MASK_VER = 4;
-  function maskSig(poly) {
-    let x = 0x811c9dc5 ^ MASK_VER;
-    for (const [a, b] of poly) for (const v of [Math.round(a * 10), Math.round(b * 10)]) { x ^= v & 0xffff; x = Math.imul(x, 16777619); x ^= v >>> 16; x = Math.imul(x, 16777619); }
-    return (x >>> 0).toString(36);
-  }
-
   // ---------- 偵測框 → 岩點輪廓 ----------
   // 每個框各自分辨「岩點」和「牆」：牆的顏色取框外一圈（不含別的岩點框），岩點的顏色取框中央的幾個代表色
   //（大岩點有亮面、陰影、鎂粉，一個顏色代表不了）。每個像素看離哪一邊的代表色近，迭代兩次修正代表色，
@@ -308,114 +281,11 @@
     return hull.map(([x, y]) => [+((x + 0.5) / s).toFixed(1), +((y + 0.5) / s).toFixed(1)]);
   }
 
-  // ---------- 岩點資料包的一筆（格式見 SPEC.md） ----------
-  // 路線岩點保留彩色的範圍：只留岩點本身。外框是凸多邊形，凹處和邊緣會包到板子，
-  // 所以外框內的像素跟外圍一圈的板子顏色比（不含別的岩點），比較像板子的維持灰階。
-  // 外框中央 50% 一定保留，板子跟岩點同色時不會整顆變灰；判斷出來太少（< 28%）就整個外框都保留。
-  // 外框是準的（改過、手畫，或 MobileSAM 重描過：source 不是 'detect'，或 traced）就整個外框都上色：顏色判斷碰到深色岩點會把它的影子
-  // 當成牆，反而把岩點本身切掉（例如黑色大岩點只剩 30% 有顏色）
-  // - 彩色範圍（x, y, w, h, r）；外框是準的就是 none＝整個外框
-  // - c：代表色 [L, a, b]（彩色範圍內彩度最高的一半的中位數；扣掉像板子的像素，選同色比較準）
-  // - t：路線色調用的顏色 [a, b]（外框中央 50% 的平均）
-  // ctx：{ img（有 getContext('2d') 的照片畫布）, W, H（照片尺寸）, holds（整面牆的岩點，用來排除別的岩點）, createCanvas?(w, h) }
-  function holdEntry(h, ctx) {
-    const mk = ctx.createCanvas || newCanvas;
-    const exact = h.source !== 'detect' || h.traced;
-    const W = ctx.W, H = ctx.H, b = bbox(h.poly);
-    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0), mg = Math.max(4, Math.round(size * 0.15));
-    const x0 = Math.max(0, Math.floor(b.x0) - mg), y0 = Math.max(0, Math.floor(b.y0) - mg);
-    const x1 = Math.min(W, Math.ceil(b.x1) + mg), y1 = Math.min(H, Math.ceil(b.y1) + mg), w = x1 - x0, hh = y1 - y0;
-    if (w < 4 || hh < 4) return { none: 1, c: 0, t: [0, 0] };
-    // 範圍圖：紅＝這顆外框內、綠＝中央 50%、藍＝別的岩點
-    const g = mk(w, hh).getContext('2d'); g.translate(-x0, -y0);
-    g.fillStyle = 'rgb(0,0,255)';
-    if (!exact) for (const o of ctx.holds) {
-      if (o === h) continue;
-      const ob = bbox(o.poly);
-      if (ob.x1 < x0 || ob.x0 > x1 || ob.y1 < y0 || ob.y0 > y1) continue;
-      g.beginPath(); tracePoly(g, o.poly); g.fill();
-    }
-    g.fillStyle = 'rgb(255,0,0)'; g.beginPath(); tracePoly(g, h.poly); g.fill();
-    const [cx, cy] = centroid(h.poly);
-    g.fillStyle = 'rgb(255,255,0)'; g.beginPath(); tracePoly(g, h.poly.map(([x, y]) => [cx + (x - cx) * 0.5, cy + (y - cy) * 0.5])); g.fill();
-    const reg = g.getImageData(0, 0, w, hh).data;
-    const lab = toLab(ctx.img.getContext('2d').getImageData(x0, y0, w, hh).data, w * hh);
-    let ta = 0, tb = 0, tn = 0;
-    for (let p = 0; p < w * hh; p++) if (reg[p * 4] > 127 && reg[p * 4 + 1] > 127) { ta += lab[p * 3 + 1]; tb += lab[p * 3 + 2]; tn++; }
-    const t = tn ? [Math.round(ta / tn), Math.round(tb / tn)] : [0, 0];
-    // 外框 75% 的範圍（深處）：判斷成板子的像素跑到深處，多半是鎂粉、反光讓岩點變淡，不是板子（板子只會在外框邊緣、凹處露出來）
-    let mid = null;
-    if (!exact) {
-      const mg2 = mk(w, hh).getContext('2d'); mg2.translate(-x0, -y0); mg2.fillStyle = '#fff';
-      mg2.beginPath(); tracePoly(mg2, h.poly.map(([x, y]) => [cx + (x - cx) * 0.75, cy + (y - cy) * 0.75])); mg2.fill();
-      mid = mg2.getImageData(0, 0, w, hh).data;
-    }
-    const on = exact ? null : colorMask(reg, lab, w, hh, size, mid);
-    const c = repColor(lab, w * hh, on ? (p) => on[p] : (p) => reg[p * 4] > 127);
-    return on ? { x: x0, y: y0, w, h: hh, r: encodeRuns(on), c, t } : { none: 1, c, t };
-  }
-  // 彩色範圍：外框內的像素跟外圍一圈的板子顏色比（不含別的岩點），比較像板子的不算；判斷失敗回傳 null（整個外框都上色）
-  // reg：範圍圖（RGBA；紅＝外框內、綠＝中央 50%、藍＝別的岩點），mid：外框 75% 的範圍（RGBA，紅＝內）
-  function colorMask(reg, lab, w, hh, size, mid) {
-    const inPts = [], bgPts = [];
-    let inside = 0;
-    for (let p = 0; p < w * hh; p++) {
-      const l = lab[p * 3], a = lab[p * 3 + 1], bb = lab[p * 3 + 2];
-      if (reg[p * 4] > 127) { inside++; inPts.push(l, a, bb); } else if (reg[p * 4 + 2] < 128) bgPts.push(l, a, bb);
-    }
-    if (!inside || bgPts.length < 60) return null;
-    const BG = kmeans(samplePts(bgPts, 600), 3);
-    let FG = kmeans(samplePts(inPts, 600), 3);
-    const keep = [];
-    for (let j = 0; j < FG.length; j += 3) if (nearest(FG[j], FG[j + 1], FG[j + 2], BG) > 12) keep.push(FG[j], FG[j + 1], FG[j + 2]);
-    if (keep.length) FG = keep;
-    let on = new Uint8Array(w * hh), cnt = 0;
-    for (let p = 0; p < w * hh; p++) {
-      if (reg[p * 4] <= 127) continue;
-      const l = lab[p * 3], a = lab[p * 3 + 1], bb = lab[p * 3 + 2];
-      if (reg[p * 4 + 1] > 127 || nearest(l, a, bb, FG) < nearest(l, a, bb, BG) * 1.15) { on[p] = 1; cnt++; }
-    }
-    if (cnt < 0.28 * inside) return null;   // 中央 50% 就佔約 25%：幾乎只剩中央表示判斷失敗
-    on = closeMask(on, w, hh, Math.max(1, Math.round(size * 0.03)));   // 補鎂粉、螺絲孔造成的小缺口
-    for (let p = 0; p < w * hh; p++) if (reg[p * 4] <= 127) on[p] = 0;   // 補縫可能補到外框外，先切回外框內
-    // 被岩點整個圍住的灰色區塊（陰影、反光被當成板子）補回來：從外框外面灌不到的就是洞
-    const reach = new Uint8Array(w * hh), st = [];
-    for (let p = 0; p < w * hh; p++) if (!on[p] && reg[p * 4] <= 127) { reach[p] = 1; st.push(p); }
-    while (st.length) {
-      const p = st.pop(), x = p % w, y = (p / w) | 0;
-      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < hh - 1 ? p + w : -1])
-        if (q >= 0 && !on[q] && !reach[q]) { reach[q] = 1; st.push(q); }
-    }
-    for (let p = 0; p < w * hh; p++) if (!reach[p]) on[p] = 1;
-    for (let p = 0; p < w * hh; p++) if (reg[p * 4] <= 127) on[p] = 0;
-    // 深處（外框 75% 內、中央 50% 外）有超過 15% 被判成板子：判斷不可靠（例如完攀點上半部沾滿鎂粉），整個外框都上色
-    let deep = 0, off = 0;
-    for (let p = 0; p < w * hh; p++) if (mid[p * 4] > 127 && reg[p * 4 + 1] <= 127) { deep++; if (!on[p]) off++; }
-    if (deep && off > deep * 0.15) return null;
-    return on;
-  }
-  // 收到的 px（不可信的資料）：格式不對的整筆丟掉，只留規格裡的欄位（SPEC.md）
-  function cleanPx(px) {
-    const out = {};
-    if (!px || typeof px !== 'object') return out;
-    for (const [id, m] of Object.entries(px)) {
-      if (!m || typeof m.s !== 'string') continue;
-      let e = null;
-      if (m.none === 1) e = { s: m.s, none: 1 };
-      else if ([m.x, m.y, m.w, m.h].every(Number.isInteger) && m.w > 0 && m.h > 0 && m.w * m.h <= 4e6 && typeof m.r === 'string' && /^[0-9a-z,]*$/.test(m.r))
-        e = { s: m.s, x: m.x, y: m.y, w: m.w, h: m.h, r: m.r };
-      const nums = (v, n) => Array.isArray(v) && v.length === n && v.every(Number.isFinite);
-      if (!e || !(m.c === 0 || nums(m.c, 3)) || !nums(m.t, 2)) continue;   // 代表色（0＝判斷不出來）、色調都要有
-      e.c = m.c; e.t = m.t; out[id] = e;
-    }
-    return out;
-  }
-
   return {
-    VERSION, MASK_VER, SAME_DE, COLOR,
+    VERSION, SAME_DE, COLOR,
     bbox, centroid, tracePoly, convexHull, ellipsePoly, simplifyPoly,
     toLab, samplePts, kmeans, nearest, repColor, colorName,
-    morph, closeMask, encodeRuns, decodeRuns, maskSig,
-    analysis, outlineContext, boxToPoly, holdEntry, colorMask, cleanPx,
+    morph, closeMask,
+    analysis, outlineContext, boxToPoly,
   };
 });

@@ -1,6 +1,6 @@
 # holdkit
 
-岩點分析函式庫與重描服務：框 → 外框、MobileSAM 重描、彩色範圍、顏色；岩點資料包格式。Apache-2.0、公開 repo。用法見 [README.md](README.md)，格式見 [SPEC.md](SPEC.md)。
+岩點分析函式庫與重描服務：框 → 外框、MobileSAM 重描、顏色；岩點資料包格式。Apache-2.0、公開 repo。用法見 [README.md](README.md)，格式見 [SPEC.md](SPEC.md)。
 
 <!-- 共同規範開始：climb-io 四個 repo（spraywall、holdscan、holdkit、holdlab）的 CLAUDE.md 這一段完全相同，改了要四個一起改 -->
 ## 語言
@@ -13,11 +13,11 @@
 |---|---|---|---|
 | climb-io/spraywall | App **Climbio**：拍牆、岩點編輯、定線、看線、分享、同步、攀爬紀錄 | 保留所有權利，私人 | Firebase 專案 `firebase-climbio`：Hosting `climbio.web.app`、登入、Firestore（資料庫 `climbio`）、Storage |
 | climb-io/holdscan | 岩點偵測：照片 → 岩點框（freeclimbs YOLOv8n） | AGPL-3.0，公開 | 雲端函式 `detect`（`firebase-climbio`，asia-east1） |
-| climb-io/holdkit | 岩點分析：框 → 外框、MobileSAM 重描、彩色範圍、顏色；岩點資料包格式（SPEC.md） | Apache-2.0，公開 | 雲端函式 `retrace`（同上）；App 依版本標記下載 |
+| climb-io/holdkit | 岩點分析：框 → 外框、MobileSAM 重描、顏色；岩點資料包格式（SPEC.md） | Apache-2.0，公開 | 雲端函式 `retrace`（同上）；App 依版本標記下載 |
 | climb-io/holdlab | 研究：實驗程式、評估、資料、結論（RESEARCH.md） | 私人 | 不部署 |
 
 - 本機路徑：`/Users/kantkang/work/climbio/<repo>`；雲端環境把需要的 repo clone 在同一層。
-- 資料流：spraywall 送照片給 holdscan 拿回框 → 用 holdkit 算外框、重描、彩色範圍，組成岩點資料包 → 存到 Firebase Storage。holdlab 的結論改進 holdscan／holdkit，再由 App 換版本採用。
+- 資料流：spraywall 送照片給 holdscan 拿回框 → 用 holdkit 算外框、重描，組成岩點資料包 → 存到 Firebase Storage。holdlab 的結論改進 holdscan／holdkit，再由 App 換版本採用。
 - **授權邊界（不能破）**：repo 之間只交換資料（框、岩點資料包），不互相引用程式。spraywall、holdkit 不能放任何 AGPL 程式或模型（放了就要跟著用 AGPL 公開）；holdkit 的模型只能用寬鬆授權的架構訓練。
 - **私有邊界**：不想讓別人直接拿去用的優化（外框整理、調過的參數和門檻、自己訓練或改良的模型權重、靠使用者資料才做得出來的功能）放 spraywall 的雲端函式（`spraywall/functions`，私人 repo，App 只拿到結果；例如 `tidy`）。不放公開的 holdkit／holdscan，也不放 App 的前端程式（前端程式會送到每個使用者的瀏覽器，誰都下載得到）。
 - **資料邊界**：研究程式和資料只放 holdlab。使用者的照片只有**分享出去的快照**（第一次分享前在 App 裡同意過，見 spraywall 的隱私權政策）可以拿來評估、訓練岩點偵測；沒分享的牆（含帳號同步的照片）和透過 Google API 拿到的資料（名稱、email）不拿來訓練模型。其他訓練用的照片直接跟館方拿並取得同意。例外：開發者自己拍、館方同意的標註牆（holdlab `tools/label_cloud.py` 放進自己的帳號，牆 id 開頭 `label-`）可以從帳號同步讀回來當標註。
@@ -72,7 +72,7 @@
 
 | 路徑 | 內容 |
 |---|---|
-| `holdkit.js` | 分析函式（瀏覽器全域 `HoldKit`，Node 用 `require`）；`VERSION`、`MASK_VER` 在檔案開頭 |
+| `holdkit.js` | 分析函式（瀏覽器全域 `HoldKit`，Node 用 `require`）；`VERSION` 在檔案開頭 |
 | `samrefine.js`、`samworker.js` | 瀏覽器的 MobileSAM 重描（全域 `HoldRefiner`） |
 | `functions/` | 雲端函式 `retrace`（asia-east1，8 vCPU，最多 2 個執行個體、每個一次接一份） |
 | `models/` | MobileSAM 的 ONNX 模型與授權 |
@@ -82,7 +82,7 @@
 
 - 不能放、也不能呼叫 AGPL 的程式或模型（包括 holdscan 和 Ultralytics 訓練的模型）。
 - 結果要可重現：同一個版本標記的結果固定。
-- 改了 `holdEntry` 的算法要加 `MASK_VER`（App 裡舊的 `px` 自動重算）；資料包結構改了要改 SPEC.md。
+- 資料包結構改了要改 SPEC.md。
 - 雲端函式只在記憶體裡處理照片，不存檔、不寫紀錄。
 
 ## 發布流程
