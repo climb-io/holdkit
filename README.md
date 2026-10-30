@@ -13,7 +13,7 @@ App 是 Climbio。三者之間只交換資料（框的陣列、[岩點資料包]
 | `samrefine.js`、`samworker.js` | 瀏覽器的 MobileSAM 重描（全域 `HoldRefiner`）：照片在雲端分析一次、整面牆一起描，照片特徵存在瀏覽器；之後單顆重描在 Worker 裡只跑解碼器（CPU） |
 | `functions/` | 雲端重描函式 `retrace`（Firebase，asia-east1，CPU）：分析照片、整面牆重描（岩點分給每個 vCPU 一個解碼 Worker 同時描，`decode.js`）、回傳照片特徵 |
 | `models/` | MobileSAM 的 ONNX 模型，來源見 `models/README.md`：encoder（28 MB）只在雲端函式用，瀏覽器只下載 decoder（16 MB） |
-| `SPEC.md` | 岩點資料包 v1 的格式 |
+| `SPEC.md` | 岩點資料包 v2 的格式 |
 
 ## 用法（瀏覽器）
 
@@ -65,18 +65,7 @@ HoldRefiner.forget(wallId);                            // 刪掉這張照片的�
 
 `GET` 同一個網址＝預熱：執行個體開機、載入模型後回 204（不帶資料、不用登入）。App 在使用者選照片時先送一個，等真的送整面牆來就不用再等冷啟動。
 
-照片只在處理當下存在伺服器記憶體中，不存檔、不留紀錄。
-
-部署（Firebase 專案 firebase-climbio，codebase `holdkit`）：
-
-```bash
-cd functions && npm install && cd ..
-npx firebase-tools deploy --only functions:holdkit
-```
-
-沒有本機 Firebase 登入時（例如雲端工作階段），用 spraywall 的 GitHub Actions 從本 repo 的 `main` 部署：`gh workflow run firebase.yml --repo climb-io/spraywall --ref main -f only=functions:holdkit`。
-
-predeploy 把 `models/` 的兩個模型複製進 `functions/models/`；`functions/.npmrc` 關掉 onnxruntime-node 安裝時下載 GPU（CUDA）版本。
+照片只在處理當下存在伺服器記憶體中，不存檔、不寫進紀錄（紀錄只有岩點數和耗時）。
 
 ## 授權
 

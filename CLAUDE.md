@@ -1,6 +1,6 @@
 # holdkit
 
-岩點分析函式庫與重描服務：框 → 外框、MobileSAM 重描、顏色；岩點資料包格式。Apache-2.0、公開 repo。用法見 [README.md](README.md)，格式見 [SPEC.md](SPEC.md)。
+岩點分析函式庫與重描服務：框 → 外框、MobileSAM 重描、顏色；岩點資料包格式。Apache-2.0、公開 repo。結構、用法與雲端重描的介面見 [README.md](README.md)，格式見 [SPEC.md](SPEC.md)。
 
 <!-- 共同規範開始：climb-io 四個 repo（spraywall、holdscan、holdkit、holdlab）的 CLAUDE.md 這一段完全相同，改了要四個一起改 -->
 ## 語言
@@ -75,36 +75,26 @@
 - Firebase 一律用 `npx firebase-tools`（本機的 `firebase` 執行檔不能用）；回 401 先跑 `npx firebase-tools login --reauth`。
 <!-- 共同規範結束 -->
 
-## 結構
-
-| 路徑 | 內容 |
-|---|---|
-| `holdkit.js` | 分析函式（瀏覽器全域 `HoldKit`，Node 用 `require`）；`VERSION` 在檔案開頭 |
-| `samrefine.js`、`samworker.js` | 瀏覽器的 MobileSAM 重描（全域 `HoldRefiner`） |
-| `functions/` | 雲端函式 `retrace`（asia-east1，8 vCPU，最多 2 個執行個體、每個一次接一份） |
-| `models/` | MobileSAM 的 ONNX 模型與授權 |
-| `SPEC.md` | 岩點資料包格式 |
-
 ## 規則
 
 - 不能放、也不能呼叫 AGPL 的程式或模型（包括 holdscan 和 Ultralytics 訓練的模型）。
 - 結果要可重現：同一個版本標記的結果固定。
 - 資料包結構改了要改 SPEC.md。
-- 雲端函式只在記憶體裡處理照片，不存檔、不寫紀錄。
+- 雲端函式只在記憶體裡處理照片：照片不存檔、不寫進紀錄（紀錄只記岩點數和耗時）。
 
 ## 發布流程
 
-1. 改程式，`holdkit.js` 的 `VERSION` 改成新版本。
+1. 改程式，`holdkit.js` 開頭的 `VERSION` 改成新版本。
 2. 把工作中的 holdkit 複製到 spraywall 的 `holdkit/`，在 App 裡實際測過。
 3. commit、推 `main`，打標記 `git tag v<版本> && git push origin v<版本>`。
-4. 改 spraywall `tools/get-holdkit.sh` 的 `HOLDKIT_VERSION`，推上去（App 自動部署）。
+4. 改 spraywall `tools/get-holdkit.sh` 的 `HOLDKIT_VERSION` 和 `HOLDKIT_COMMIT`，推上去（App 自動部署）。
 5. 雲端函式有改才部署（見下方）。
 
 ## 驗證
 
 | 改動 | 必跑 |
 |---|---|
-| 任何程式碼 | `node --check holdkit.js samrefine.js samworker.js functions/index.js functions/sam.js`；`node -e "require('./holdkit.js')"` |
+| 任何程式碼 | `node --check holdkit.js samrefine.js samworker.js functions/index.js functions/sam.js functions/decode.js`；`node -e "require('./holdkit.js')"` |
 | 算法 | 在 spraywall 用實際的牆比較改前改後；規則調整用 holdlab 的評估腳本 |
 | 雲端函式 | 部署後 `curl -s -o /dev/null -w '%{http_code}' -X POST https://asia-east1-firebase-climbio.cloudfunctions.net/retrace` 回 401，再從手機版 App 實際重描一次 |
 
@@ -120,4 +110,4 @@ npx firebase-tools deploy --only functions:holdkit
 雲端工作階段（沒有 Firebase 憑證）：用 spraywall 的 GitHub Actions，從本 repo 的 `main` 取出部署（先推上 `main`），金鑰只留在 spraywall：
 `gh workflow run firebase.yml --repo climb-io/spraywall --ref main -f only=functions:holdkit`，再 `gh run list --repo climb-io/spraywall --workflow firebase.yml` 看結果。
 
-predeploy 把 `models/` 的兩個模型複製進 `functions/models/`；`functions/.npmrc` 關掉 GPU 版 onnxruntime 的下載。
+`retrace` 的規格：asia-east1，8 vCPU，最多 2 個執行個體、每個一次接一份。predeploy 把 `models/` 的兩個模型複製進 `functions/models/`；`functions/.npmrc` 關掉 GPU 版 onnxruntime 的下載。
