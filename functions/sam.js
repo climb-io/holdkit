@@ -1,5 +1,5 @@
 // 雲端重描輪廓（MobileSAM，CPU）：手機把長邊縮到 1024 的照片和要重描的岩點框送上來，在這裡分析一次照片，岩點分給解碼 Worker（decode.js）同時切出來，回傳新外框。
-// 跟 samrefine.js 同一套模型、同一種提示（只用框）和外輪廓追蹤，結果跟電腦版、手機版一樣。
+// 跟 samrefine.js 同一套模型、同一種提示（只用框）和外輪廓追蹤，結果跟瀏覽器一樣。
 // 模型部署時從 models/ 複製進來（firebase.json 的 predeploy，同一份檔案不另外進版控），載入後同一個執行個體留在記憶體。
 const ort = require('onnxruntime-node');
 const { Worker } = require('worker_threads');
@@ -19,7 +19,7 @@ async function loadModels() {
     if (!local) throw new Error(`model ${name} not found`);
     return local;
   };
-  // encoder 的執行緒數、解碼 Worker 數照雲端函式分到的 vCPU（index.js 的 CPUS）：系統回報的核心數是整台主機的，照那個開會互搶，反而慢
+  // encoder 的執行緒數、解碼 Worker 數照雲端函式分到的 vCPU（CPUS）：系統回報的核心數是整台主機的，照那個開會互搶，反而慢
   const opt = { executionProviders: ['cpu'], graphOptimizationLevel: 'all', intraOpNumThreads: CPUS, interOpNumThreads: 1 };
   const decoders = Array.from({ length: CPUS }, () => new Worker(path.join(__dirname, 'decode.js'), { workerData: { model: find('mobilesam-decoder.onnx') } }));
   try {
@@ -81,7 +81,7 @@ async function refineAll(jpeg, holds) {
   try { out = await decodeAll(s.decoders, ed, w, h, holds); }
   catch (e) { s.decoders.forEach(wk => wk.terminate()); sessions = null; throw e; }   // Worker 出錯：下一份重新載入
   const decode = Date.now() - t1;
-  return { holds: out, emb: { q: q.toString('base64'), lo, sc, w, h }, ms: { load: first, encode, decode }, cpus: [CPUS, require('os').cpus().length] };
+  return { holds: out, emb: { q: q.toString('base64'), lo, sc, w, h }, ms: { load: first, encode, decode } };
 }
 
 // 預熱（index.js 的 GET）：先載入模型，載入時間不算進下一份重描

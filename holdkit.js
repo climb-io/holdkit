@@ -283,9 +283,8 @@
 
   return {
     VERSION, SAME_DE, COLOR,
-    bbox, centroid, tracePoly, convexHull, ellipsePoly, simplifyPoly,
-    toLab, samplePts, kmeans, nearest, repColor, colorName,
-    morph, closeMask,
+    bbox, centroid, tracePoly, simplifyPoly,
+    toLab, repColor, colorName,
     analysis, outlineContext, boxToPoly,
   };
 });
