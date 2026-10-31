@@ -1,5 +1,10 @@
 # holdkit
 
+> **這個 repo 已不再更新。** holdkit 已經併進 Climbio，之後會在 [climb-io/climbio](https://github.com/climb-io/climbio) 跟 App 一起公開（`holdkit/` 資料夾）。
+>
+> **This repository is no longer updated.** holdkit has moved into Climbio and will be published with the app at [climb-io/climbio](https://github.com/climb-io/climbio) (the `holdkit/` folder).
+
+
 攀岩牆岩點階段的分析：偵測框 → 岩點外框、MobileSAM 重描外框、顏色名稱。Apache-2.0。
 
 岩點偵測（照片 → 框）在 [climb-io/holdscan](https://github.com/climb-io/holdscan)（AGPL-3.0），
