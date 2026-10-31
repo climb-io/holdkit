@@ -11,7 +11,8 @@ App 是 Climbio。三者之間只交換資料（框的陣列、[岩點資料包]
 |---|---|
 | `holdkit.js` | 分析函式（瀏覽器全域 `HoldKit`，Node 用 `require`）：外框、顏色名稱 |
 | `samrefine.js`、`samworker.js` | 瀏覽器的 MobileSAM 重描（全域 `HoldRefiner`）：照片在雲端分析一次、整面牆一起描，照片特徵存在瀏覽器；之後單顆重描在 Worker 裡只跑解碼器（CPU） |
-| `functions/` | 雲端重描函式 `retrace`（Firebase，asia-east1，CPU）：分析照片、整面牆重描（岩點分給每個 vCPU 一個解碼 Worker 同時描，`decode.js`）、回傳照片特徵 |
+| `functions/` | 雲端重描 `retrace`：分析照片、整面牆重描（岩點分給每個 vCPU 一個解碼 Worker 同時描，`decode.js`）、回傳照片特徵。處理在 `handler.js`（跟平台無關），外殼有 Firebase 版 `index.js` 和一般 Node 伺服器版 `server.js` |
+| `Dockerfile` | `server.js` 的容器映像 |
 | `models/` | MobileSAM 的 ONNX 模型，來源見 `models/README.md`：encoder（28 MB）只在雲端函式用，瀏覽器只下載 decoder（16 MB） |
 | `SPEC.md` | 岩點資料包 v2 的格式 |
 
@@ -66,6 +67,27 @@ HoldRefiner.forget(wallId);                            // 刪掉這張照片的�
 `GET` 同一個網址＝預熱：執行個體開機、載入模型後回 204（不帶資料、不用登入）。App 在使用者選照片時先送一個，等真的送整面牆來就不用再等冷啟動。
 
 照片只在處理當下存在伺服器記憶體中，不存檔、不寫進紀錄（紀錄只有岩點數和耗時）。
+
+### 自己架設
+
+`functions/server.js` 是同一個服務的一般 Node 伺服器版，不需要 Firebase，Docker、Cloud Run、Fly 或自己的機器都能跑（記憶體至少 4 GB）：
+
+```bash
+docker build -t holdkit-retrace .
+docker run -p 8080:8080 -e API_KEY=換成你的密鑰 -e ORIGINS=https://你的網站 holdkit-retrace
+```
+
+不用 Docker：`cd functions && npm install && API_KEY=換成你的密鑰 node server.js`（模型讀 repo 的 `models/`）。
+
+| 環境變數 | 說明 |
+|---|---|
+| `AUTH` | `key`（預設，`Authorization: Bearer` 要等於 `API_KEY`）、`firebase`（Firebase 的 ID token）或 `none`（不驗證，只在本機或私人網路用） |
+| `API_KEY` | `AUTH=key` 的密鑰 |
+| `ORIGINS` | 允許跨網域呼叫的網站，逗號分隔；`*` 是全部 |
+| `SAM_CPUS` | encoder 執行緒數和解碼 Worker 數，照分到的 vCPU 設（預設 8） |
+| `PORT` | 預設 8080 |
+
+App 端把 `HoldRefiner.configure` 的 `cloudUrl` 換成你的網址，`idToken` 回傳你的密鑰。
 
 ## 授權
 

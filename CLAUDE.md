@@ -95,7 +95,7 @@
 
 | 改動 | 必跑 |
 |---|---|
-| 任何程式碼 | `node --check holdkit.js samrefine.js samworker.js functions/index.js functions/sam.js functions/decode.js`；`node -e "require('./holdkit.js')"` |
+| 任何程式碼 | `node --check holdkit.js samrefine.js samworker.js functions/index.js functions/handler.js functions/server.js functions/sam.js functions/decode.js`；`node -e "require('./holdkit.js')"` |
 | 算法 | 在 spraywall 用實際的牆比較改前改後；規則調整用 holdlab 的評估腳本 |
 | 雲端函式 | 部署後 `curl -s -o /dev/null -w '%{http_code}' -X POST https://asia-east1-firebase-climbio.cloudfunctions.net/retrace` 回 401，再從手機版 App 實際重描一次 |
 
